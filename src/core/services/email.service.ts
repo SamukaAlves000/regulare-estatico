@@ -4,7 +4,9 @@ export interface InviteEmailData {
   to: string;
   userName: string;
   companyName: string;
-  inviteLink: string;
+  inviteLink?: string;
+  origin?: string;
+  type?: 'INVITE' | 'RESET';
 }
 
 @Injectable({

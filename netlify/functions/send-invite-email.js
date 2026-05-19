@@ -1,4 +1,23 @@
 const nodemailer = require('nodemailer');
+const admin = require('firebase-admin');
+
+// Inicializar Firebase Admin se as credenciais estiverem presentes
+if (!admin.apps.length) {
+  try {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      console.log('[DEBUG] Firebase Admin inicializado via Service Account');
+    } else {
+      admin.initializeApp();
+      console.log('[DEBUG] Firebase Admin inicializado (default)');
+    }
+  } catch (error) {
+    console.warn('[DEBUG] Firebase Admin não pôde ser inicializado:', error.message);
+  }
+}
 
 exports.handler = async (event, context) => {
   console.log('[DEBUG] Function send-invite-email disparada');
@@ -27,9 +46,10 @@ exports.handler = async (event, context) => {
   try {
     // 3. Parse e validação do corpo da requisição
     const body = JSON.parse(event.body);
-    const { to, companyName, inviteLink, userName } = body;
+    const { to, companyName, userName, type = 'INVITE', origin } = body;
+    let { inviteLink } = body;
 
-    if (!to || !companyName || !inviteLink || !userName) {
+    if (!to || !companyName || !userName) {
       return {
         statusCode: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -37,7 +57,29 @@ exports.handler = async (event, context) => {
       };
     }
 
-    console.log('[DEBUG] Enviando e-mail para:', to);
+    // 3.1 Gerar link real do Firebase se possível
+    if (admin.apps.length > 0) {
+      try {
+        const actionCodeSettings = {
+          url: origin ? `${origin}/login` : 'https://regulare.netlify.app/login',
+          handleCodeInApp: true,
+        };
+        inviteLink = await admin.auth().generatePasswordResetLink(to, actionCodeSettings);
+        console.log('[DEBUG] Link real do Firebase gerado com sucesso');
+      } catch (linkError) {
+        console.warn('[DEBUG] Erro ao gerar link do Firebase (usando fallback):', linkError.message);
+        if (!inviteLink) inviteLink = origin ? `${origin}/login` : 'https://regulare.netlify.app/login';
+      }
+    } else if (!inviteLink) {
+      inviteLink = origin ? `${origin}/login` : 'https://regulare.netlify.app/login';
+    }
+
+    const isReset = type === 'RESET';
+    const subject = isReset ? 'Redefinição de Senha - Regulare' : 'Convite de Acesso - Regulare';
+    const title = isReset ? 'Redefinição de Senha' : 'Bem-vindo ao Regulare!';
+    const actionText = isReset ? 'Redefinir Senha' : 'Definir Senha';
+    
+    console.log(`[DEBUG] Enviando e-mail de ${type} para:`, to);
 
     // 4. Configurar Transporter
     const transporter = nodemailer.createTransport({
@@ -122,10 +164,17 @@ exports.handler = async (event, context) => {
         <div class="header"><h2 style="color: #ffffff; margin: 0;">REGULARE</h2></div>
         <div class="content">
             <h1>Olá, ${userName}!</h1>
-            <p>Você foi convidado para acessar a plataforma <strong>Regulare</strong>.</p>
+            ${isReset 
+              ? `<p>Recebemos uma solicitação para redefinir a senha da sua conta no <strong>Regulare</strong>.</p>
+                 <p>Se você não solicitou essa alteração, pode ignorar este e-mail com segurança.</p>`
+              : `<p>Você foi convidado para acessar a plataforma <strong>Regulare</strong>.</p>`
+            }
             <div class="info-box"><strong>Empresa vinculada:</strong> ${companyName}</div>
-            <p>Para começar a utilizar o sistema, você precisa definir sua senha de acesso clicando no botão abaixo:</p>
-            <div class="button-container"><a href="${inviteLink}" class="button">Definir Senha</a></div>
+            <p>${isReset 
+              ? 'Para criar uma nova senha, clique no botão abaixo:' 
+              : 'Para começar a utilizar o sistema, você precisa definir sua senha de acesso clicando no botão abaixo:'
+            }</p>
+            <div class="button-container"><a href="${inviteLink}" class="button">${actionText}</a></div>
             <p style="margin-top: 30px; font-size: 14px; color: #555;">
                 Se o botão não funcionar, copie este link: <br>
                 <span style="word-break: break-all; color: #007bff;">${inviteLink}</span>
@@ -143,7 +192,7 @@ exports.handler = async (event, context) => {
     await transporter.sendMail({
       from: `"Regulare" <${EMAIL_USER}>`,
       to: to,
-      subject: 'Convite de Acesso - Regulare',
+      subject: subject,
       html: htmlContent,
     });
 

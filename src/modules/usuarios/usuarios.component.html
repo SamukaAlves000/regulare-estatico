@@ -151,8 +151,8 @@
                                 (click)="toggleStatus(u)"
                                 [matTooltip]="u.active ? 'Desativar' : 'Ativar'"
                         >
-                            <mat-icon [color]="u.active ? 'warn' : 'primary'">
-                                {{ u.active ? 'person_off' : 'person' }}
+                            <mat-icon [color]="u.active ? 'accent' : 'warn'">
+                                {{ u.active ? 'toggle_on' : 'toggle_off' }}
                             </mat-icon>
                         </button>
 

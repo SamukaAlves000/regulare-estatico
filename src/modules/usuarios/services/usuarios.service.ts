@@ -118,7 +118,8 @@ export class UsuariosService {
           to: input.email,
           userName: input.name,
           companyName: companyName,
-          inviteLink: `${window.location.origin}/login`
+          origin: window.location.origin,
+          type: 'INVITE'
         });
 
         await this.auditLog.log({
@@ -231,7 +232,8 @@ export class UsuariosService {
         to: email,
         userName: user?.name || 'Usuário',
         companyName: companyName,
-        inviteLink: `${window.location.origin}/login`
+        origin: window.location.origin,
+        type: 'RESET'
       });
       
       const admin = this.session.user();
