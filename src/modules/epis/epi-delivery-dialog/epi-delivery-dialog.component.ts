@@ -619,9 +619,10 @@ export class EpiDeliveryDialogComponent implements OnInit, OnDestroy {
         let signatureBase64 = null;
         if (this.data?.signed && this.data?.signatureUrl) {
             try {
-                this.snack.open('Processando assinatura para o PDF...', 'OK', { duration: 2000 });
-                signatureBase64 = await this.getBase64ImageFromURL(this.data.signatureUrl);
-            } catch (error) {
+        this.snack.open('Processando assinatura para o PDF...', 'OK', { duration: 2000 });
+        signatureBase64 = await this.getBase64ImageFromURL(this.data.signatureUrl);
+        await this.epiDeliveriesService.logDownloadTerm(this.data.id);
+      } catch (error) {
                 console.error('Erro ao converter assinatura para Base64:', error);
                 this.snack.open('Aviso: Erro de segurança (CORS) ao carregar assinatura do Firebase.', 'OK', { duration: 6000 });
                 console.warn('DICA: O bucket do Firebase Storage precisa estar configurado para permitir CORS da origem atual.');

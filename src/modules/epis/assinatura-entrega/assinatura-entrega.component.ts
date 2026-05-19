@@ -7,6 +7,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { EpiDeliveriesRepository } from '../repositories/epi-deliveries.repository';
+import { EpiDeliveriesService } from '../services/epi-deliveries.service';
 import { EpiDelivery } from '../models/epi-delivery.model';
 import { ref, uploadString, getDownloadURL, Storage } from '@angular/fire/storage';
 
@@ -197,6 +198,15 @@ export class AssinaturaEntregaComponent implements OnInit {
       
       this.snackBar.open('Assinatura salva com sucesso!', 'Fechar', { duration: 3000 });
       await this.loadEntrega();
+
+      // Log audit
+      try {
+        const service = inject(EpiDeliveriesService);
+        await service.logSignature(this.entregaId, { method: 'canvas_direct' });
+      } catch (logErr) {
+        console.error('Audit log error:', logErr);
+      }
+
     } catch (err) {
       console.error(err);
       this.snackBar.open('Erro ao salvar assinatura.', 'Fechar', { duration: 5000 });

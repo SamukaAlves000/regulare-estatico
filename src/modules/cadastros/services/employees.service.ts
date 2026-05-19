@@ -1,11 +1,14 @@
 import { Injectable } from '@angular/core';
 import { EmployeesRepository } from '../repositories/employees.repository';
 import { Employee } from '../models/employee.model';
+import { AuditUser } from '../models/company.model';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
 import { CompaniesRepository } from '../repositories/companies.repository';
 import { UnitsRepository } from '../repositories/units.repository';
 import { CargosRepository } from '../repositories/cargos.repository';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 
 function makeId(prefix = '') { return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2,8)}`; }
 
@@ -18,6 +21,7 @@ export class EmployeesService {
     private readonly companiesRepo: CompaniesRepository,
     private readonly unitsRepo: UnitsRepository,
     private readonly cargosRepo: CargosRepository,
+    private readonly auditLog: AuditLogService
   ) {}
 
   private getUid(): string {
@@ -54,7 +58,7 @@ export class EmployeesService {
 
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const createdBy = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const createdBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     const now = new Date().toISOString();
     const id = `emp_${makeId()}`;
 
@@ -102,14 +106,32 @@ export class EmployeesService {
       createdBy,
     } as Employee;
 
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.EMPLOYEE_CREATE_ERROR, createError, { name: doc.name, companyId: doc.companyId });
+      throw createError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.EMPLOYEE_CREATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: createdBy.email,
+        userId: createdBy.uid,
+        details: { employeeId: id, name: doc.name, companyId: doc.companyId }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 
   async updateEmployee(id: string, patch: Partial<Employee>) {
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const updatedBy = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     const now = new Date().toISOString();
 
     // CLIENTE: não permitir trocar companyId e sempre garantir companyId do logado
@@ -122,7 +144,24 @@ export class EmployeesService {
     const safePatch: any = { ...patch, updatedAt: now, updatedBy };
     Object.keys(safePatch).forEach((k) => safePatch[k] === undefined && delete safePatch[k]);
 
-    await this.repo.updateEmployee(id, safePatch);
+    try {
+      await this.repo.updateEmployee(id, safePatch);
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.EMPLOYEE_UPDATE_ERROR, updateError, { employeeId: id, patch: safePatch });
+      throw updateError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.EMPLOYEE_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: updatedBy.email,
+        userId: updatedBy.uid,
+        details: { employeeId: id, patch: safePatch }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async setActive(id: string, ativo: boolean) {
@@ -140,7 +179,25 @@ export class EmployeesService {
   }
 
   async getEmployee(id: string) {
-    return this.repo.getById(id);
+    const employee = await this.repo.getById(id);
+
+    if (employee) {
+      try {
+        const uid = this.getUid();
+        const user = await this.usersRepo.get(uid);
+        await this.auditLog.log({
+          action: AuditAction.EMPLOYEE_VIEWED,
+          appVersion: '',
+          osVersion: '',
+          user_profile: user?.profile || 'UNKNOWN',
+          userEmail: user?.email ?? '',
+          userId: uid,
+          details: { employeeId: id, name: employee.name }
+        });
+      } catch (e) { console.error('Audit error:', e); }
+    }
+
+    return employee;
   }
 
   async listByFilters(filters: { companyId?: string; unitId?: string; cargoId?: string; status?: string }) {

@@ -5,6 +5,8 @@ import { CompanyCargo, Cargo } from '../models/cargo.model';
 import { AuditUser } from '../models/company.model';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 
 function makeId(prefix = '') { return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2,8)}`; }
 
@@ -14,6 +16,7 @@ export class CompanyCargosService {
   private readonly genericRepo = inject(CargosRepository);
   private readonly session = inject(SessionService);
   private readonly usersRepo = inject(UsersRepository);
+  private readonly auditLog = inject(AuditLogService);
 
   private getUid(): string {
     const u = (this.session as any).user?.();
@@ -23,7 +26,7 @@ export class CompanyCargosService {
   async createFromGeneric(companyId: string, genericCargo: Cargo): Promise<string> {
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     const now = new Date().toISOString();
     const id = `ccargo_${makeId()}`;
 
@@ -39,7 +42,25 @@ export class CompanyCargosService {
       status: 'ativo'
     };
 
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.COMPANY_CARGO_LINK_ERROR, createError, { companyId, genericCargoId: genericCargo.id });
+      throw createError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_CARGO_LINKED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { companyId, companyCargoId: id, genericCargoId: genericCargo.id, cargoName: genericCargo.name }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 
@@ -51,13 +72,49 @@ export class CompanyCargosService {
     const now = new Date().toISOString();
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     
-    await this.repo.updateCargo(id, { ...patch, updatedAt: now, updatedBy });
+    try {
+      await this.repo.updateCargo(id, { ...patch, updatedAt: now, updatedBy });
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.COMPANY_CARGO_UPDATE_ERROR, updateError, { companyCargoId: id, patch });
+      throw updateError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_CARGO_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: updatedBy.email,
+        userId: updatedBy.uid,
+        details: { companyCargoId: id, patch }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async deleteCargo(id: string): Promise<void> {
-    await this.repo.deleteCargo(id);
+    try {
+      await this.repo.deleteCargo(id);
+    } catch (deleteError) {
+      await this.auditLog.logError(AuditAction.COMPANY_CARGO_DELETE_ERROR, deleteError, { companyCargoId: id });
+      throw deleteError;
+    }
+
+    try {
+      const uid = this.getUid();
+      const user = await this.usersRepo.get(uid);
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_CARGO_DELETED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: user?.email ?? '',
+        userId: uid,
+        details: { companyCargoId: id }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async searchCargos(companyId: string, term: string): Promise<CompanyCargo[]> {

@@ -7,6 +7,8 @@ import { MatMenuModule } from '@angular/material/menu';
 import { MatSelectModule } from '@angular/material/select';
 import { MatOptionModule } from '@angular/material/core';
 import { SessionService } from '../../core/services/session.service';
+import { AuditLogService } from '../../core/services/audit-log.service';
+import { AuditAction } from '../../core/models/audit-log.model';
 import { Router, NavigationEnd, ActivatedRoute } from '@angular/router';
 import { filter, map } from 'rxjs/operators';
 import { Subscription, Observable, merge, of } from 'rxjs';
@@ -46,6 +48,7 @@ import { NotificationsPanelComponent } from '../sidebar/notifications-panel.comp
 export class TopbarComponent implements OnDestroy, OnInit {
   @Output() toggle = new EventEmitter<void>();
   readonly session = inject(SessionService);
+  private readonly auditLog = inject(AuditLogService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly companiesRepo = inject(CompaniesRepository);
@@ -174,7 +177,28 @@ export class TopbarComponent implements OnDestroy, OnInit {
     this.sub?.unsubscribe();
   }
 
-  logout() { this.session.logout(); }
+  async logout() {
+    const user = this.session.user();
+    if (user) {
+      try {
+        await this.auditLog.log({
+          action: AuditAction.LOGOUT,
+          appVersion: '',
+          osVersion: '',
+          details: {
+            userAgent: navigator.userAgent
+          },
+          user_profile: user.profile,
+          userEmail: user.email,
+          userId: user.id
+        });
+      } catch (e) {
+        console.error('[Topbar] Erro ao registrar log de logout:', e);
+        // Não usamos logError aqui para evitar recursividade/falha se o log geral já falhou
+      }
+    }
+    this.session.logout();
+  }
 
   userName(): string {
     const u = this.session.user();

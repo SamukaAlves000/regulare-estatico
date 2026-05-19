@@ -4,6 +4,8 @@ import { Risk } from '../models/risk.model';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
 import { AuditUser } from '../models/company.model';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 
 function makeId(prefix = '') {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -24,7 +26,8 @@ export class RisksService {
   constructor(
     private readonly repo: RisksRepository,
     private readonly session: SessionService,
-    private readonly usersRepo: UsersRepository
+    private readonly usersRepo: UsersRepository,
+    private readonly auditLog: AuditLogService
   ) {}
 
   private getUid(): string {
@@ -35,7 +38,7 @@ export class RisksService {
   private async getAuditUser(): Promise<AuditUser> {
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    return { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    return { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
   }
 
   /**
@@ -98,7 +101,26 @@ export class RisksService {
       if (doc[k] === undefined) delete doc[k];
     }
 
-    await this.repo.create(doc as Risk);
+    try {
+      await this.repo.create(doc as Risk);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.RISK_CREATE_ERROR, createError, { name: doc.name, companyId: doc.companyId });
+      throw createError;
+    }
+
+    try {
+      const user = await this.usersRepo.get(audit.uid);
+      await this.auditLog.log({
+        action: AuditAction.RISK_CREATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { riskId: id, name: doc.name, companyId: doc.companyId }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 
@@ -124,7 +146,25 @@ export class RisksService {
       if (safePatch[k] === undefined) delete safePatch[k];
     }
 
-    await this.repo.updateRisk(id, safePatch);
+    try {
+      await this.repo.updateRisk(id, safePatch);
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.RISK_UPDATE_ERROR, updateError, { riskId: id, patch: safePatch });
+      throw updateError;
+    }
+
+    try {
+      const user = await this.usersRepo.get(audit.uid);
+      await this.auditLog.log({
+        action: AuditAction.RISK_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { riskId: id, patch: safePatch }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async setActive(id: string, ativo: boolean): Promise<void> {

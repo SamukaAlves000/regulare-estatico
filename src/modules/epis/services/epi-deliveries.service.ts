@@ -6,6 +6,8 @@ import { UsersRepository } from '../../../core/services/users.repository';
 import { AuditUser } from '../../cadastros/models/company.model';
 import { AlertsService } from '../../alertas/services/alerts.service';
 import { CompaniesRepository } from '../../cadastros/repositories/companies.repository';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 
 function makeId(prefix = '') {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -18,6 +20,7 @@ export class EpiDeliveriesService {
   private readonly usersRepo = inject(UsersRepository);
   private readonly alerts = inject(AlertsService);
   private readonly companiesRepo = inject(CompaniesRepository);
+  private readonly auditLog = inject(AuditLogService);
 
   private getUid(): string {
     const u = this.session.user();
@@ -46,7 +49,7 @@ export class EpiDeliveriesService {
 
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     const now = new Date().toISOString();
     const id = `deliv_${makeId()}`;
 
@@ -78,70 +81,18 @@ export class EpiDeliveriesService {
       if (safeDoc[key] === undefined) delete safeDoc[key];
     });
 
-    await this.repo.set(safeDoc);
+    try {
+      await this.repo.set(safeDoc);
 
-    // Gerar alertas para cada item com validade CA
-    if (doc.items && doc.items.length > 0) {
-      const company = await this.companiesRepo.get(doc.companyId);
-      const companyName = company?.nomeFantasia || company?.razaoSocial || 'N/A';
-      
-      // Limpar todos os alertas desta entrega (ID completo) antes de regenerar
-      await this.alerts.deleteAlertsByOriginPrefix(`${id}_`);
-
-      for (const item of doc.items) {
-        if (item.validUntil) {
-          await this.alerts.generateAlerts(
-            'epi', 
-            `${id}_${item.equipmentId}`, 
-            uid, 
-            item.validUntil,
-            {
-              companyId: doc.companyId,
-              companyName,
-              documento: `${item.name} (${doc.employeeName})`
-            }
-          );
-        }
-      }
-    }
-
-    return id;
-  }
-
-  async updateDelivery(id: string, patch: Partial<EpiDelivery>): Promise<void> {
-    const uid = this.getUid();
-    const user = await this.usersRepo.get(uid);
-    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
-    const now = new Date().toISOString();
-
-    const safePatch: any = { ...patch, updatedAt: now, updatedBy };
-    Object.keys(safePatch).forEach(key => {
-      if (safePatch[key] === undefined) delete safePatch[key];
-    });
-
-    await this.repo.update(id, safePatch);
-
-    // Se marcou como excluído, limpa todos os alertas vinculados
-    if (patch.deleted === true) {
-      await this.alerts.deleteAlertsByOriginPrefix(`${id}_`);
-      return;
-    }
-
-    // Se os itens ou dados base foram atualizados, regeneramos os alertas
-    if (patch.items || patch.employeeName || patch.companyId) {
-      const current = await this.getDelivery(id);
-      if (current) {
-        const company = await this.companiesRepo.get(current.companyId);
+      // Gerar alertas para cada item com validade CA
+      if (doc.items && doc.items.length > 0) {
+        const company = await this.companiesRepo.get(doc.companyId);
         const companyName = company?.nomeFantasia || company?.razaoSocial || 'N/A';
-        const empName = current.employeeName || 'N/A';
         
         // Limpar todos os alertas desta entrega (ID completo) antes de regenerar
         await this.alerts.deleteAlertsByOriginPrefix(`${id}_`);
 
-        // Usar itens atuais do banco (que já foram atualizados pelo update acima se patch.items existia)
-        const itemsToProcess = current.items || [];
-
-        for (const item of itemsToProcess) {
+        for (const item of doc.items) {
           if (item.validUntil) {
             await this.alerts.generateAlerts(
               'epi', 
@@ -149,14 +100,116 @@ export class EpiDeliveriesService {
               uid, 
               item.validUntil,
               {
-                companyId: current.companyId,
+                companyId: doc.companyId,
                 companyName,
-                documento: `${item.name} (${empName})`
+                documento: `${item.name} (${doc.employeeName})`
               }
             );
           }
         }
       }
+
+      await this.auditLog.log({
+        action: AuditAction.EPI_DELIVERY_CREATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: audit.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { deliveryId: id, employeeId: doc.employeeId, items: doc.items?.length }
+      });
+
+      return id;
+    } catch (error) {
+      await this.auditLog.logError(AuditAction.EPI_DELIVERY_CREATE_ERROR, error, { input });
+      throw error;
+    }
+  }
+
+  async updateDelivery(id: string, patch: Partial<EpiDelivery>): Promise<void> {
+    const uid = this.getUid();
+    const user = await this.usersRepo.get(uid);
+    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
+    const now = new Date().toISOString();
+
+    const safePatch: any = { ...patch, updatedAt: now, updatedBy };
+    Object.keys(safePatch).forEach(key => {
+      if (safePatch[key] === undefined) delete safePatch[key];
+    });
+
+    try {
+      await this.repo.update(id, safePatch);
+
+      // Se marcou como excluído, limpa todos os alertas vinculados
+      if (patch.deleted === true) {
+        await this.alerts.deleteAlertsByOriginPrefix(`${id}_`);
+        
+        await this.auditLog.log({
+          action: AuditAction.EPI_DELIVERY_DELETED,
+          appVersion: '',
+          osVersion: '',
+          user_profile: updatedBy.profile || 'UNKNOWN',
+          userEmail: updatedBy.email,
+          userId: updatedBy.uid,
+          details: { deliveryId: id }
+        });
+        return;
+      }
+
+      // Se os itens ou dados base foram atualizados, regeneramos os alertas
+      if (patch.items || patch.employeeName || patch.companyId) {
+        const current = await this.getDelivery(id);
+        if (current) {
+          const company = await this.companiesRepo.get(current.companyId);
+          const companyName = company?.nomeFantasia || company?.razaoSocial || 'N/A';
+          const empName = current.employeeName || 'N/A';
+          
+          // Limpar todos os alertas desta entrega (ID completo) antes de regenerar
+          await this.alerts.deleteAlertsByOriginPrefix(`${id}_`);
+
+          // Usar itens atuais do banco (que já foram atualizados pelo update acima se patch.items existia)
+          const itemsToProcess = current.items || [];
+
+          for (const item of itemsToProcess) {
+            if (item.validUntil) {
+              await this.alerts.generateAlerts(
+                'epi', 
+                `${id}_${item.equipmentId}`, 
+                uid, 
+                item.validUntil,
+                {
+                  companyId: current.companyId,
+                  companyName,
+                  documento: `${item.name} (${empName})`
+                }
+              );
+            }
+          }
+        }
+      }
+
+      // Evita log duplicado se for apenas upload de comprovante
+      const businessFields = ['unitId', 'sectorId', 'employeeId', 'employeeName', 'cargoId', 'cargoName', 'cargoCbo', 'deliveryDate', 'items', 'riskIds', 'companyId', 'companyName', 'companyCnpj'];
+      const hasBusinessChanges = Object.keys(patch).some(key => 
+        businessFields.includes(key) && patch[key as keyof typeof patch] !== undefined
+      );
+
+      const isReceiptUpload = !!patch.receiptUrl;
+
+      if (hasBusinessChanges || !isReceiptUpload) {
+        await this.auditLog.log({
+          action: AuditAction.EPI_DELIVERY_UPDATED,
+          appVersion: '',
+          osVersion: '',
+          user_profile: updatedBy.profile || 'UNKNOWN',
+          userEmail: updatedBy.email,
+          userId: updatedBy.uid,
+          details: { deliveryId: id, patch }
+        });
+      }
+    } catch (error) {
+      await this.auditLog.logError(AuditAction.EPI_DELIVERY_UPDATE_ERROR, error, { deliveryId: id, patch });
+      throw error;
     }
   }
 
@@ -183,7 +236,67 @@ export class EpiDeliveriesService {
   }
 
   async deleteDelivery(id: string): Promise<void> {
-    await this.alerts.deleteAlertsByOriginPrefix(`${id}_`);
-    return this.repo.delete(id);
+    try {
+      await this.alerts.deleteAlertsByOriginPrefix(`${id}_`);
+      await this.repo.delete(id);
+
+      const uid = this.getUid();
+      const user = await this.usersRepo.get(uid);
+      await this.auditLog.log({
+        action: AuditAction.EPI_DELIVERY_DELETED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: user?.email ?? '',
+        userId: uid,
+        details: { deliveryId: id, mode: 'hard' }
+      });
+    } catch (error) {
+      await this.auditLog.logError(AuditAction.EPI_DELIVERY_UPDATE_ERROR, error, { deliveryId: id, mode: 'hard' });
+      throw error;
+    }
+  }
+
+  // Métodos específicos solicitados para log
+  async logSignature(id: string, details: any): Promise<void> {
+    const uid = this.getUid();
+    const user = await this.usersRepo.get(uid);
+    await this.auditLog.log({
+      action: AuditAction.EPI_DELIVERY_SIGNED,
+      appVersion: '',
+      osVersion: '',
+      user_profile: user?.profile || 'UNKNOWN',
+      userEmail: user?.email ?? '',
+      userId: uid,
+      details: { deliveryId: id, ...details }
+    });
+  }
+
+  async logDocumentUpload(id: string, fileName: string): Promise<void> {
+    const uid = this.getUid();
+    const user = await this.usersRepo.get(uid);
+    await this.auditLog.log({
+      action: AuditAction.EPI_DELIVERY_DOCUMENT_UPLOADED,
+      appVersion: '',
+      osVersion: '',
+      user_profile: user?.profile || 'UNKNOWN',
+      userEmail: user?.email ?? '',
+      userId: uid,
+      details: { deliveryId: id, fileName }
+    });
+  }
+
+  async logDownloadTerm(id: string): Promise<void> {
+    const uid = this.getUid();
+    const user = await this.usersRepo.get(uid);
+    await this.auditLog.log({
+      action: AuditAction.EPI_DELIVERY_TERM_DOWNLOADED,
+      appVersion: '',
+      osVersion: '',
+      user_profile: user?.profile || 'UNKNOWN',
+      userEmail: user?.email ?? '',
+      userId: uid,
+      details: { deliveryId: id }
+    });
   }
 }

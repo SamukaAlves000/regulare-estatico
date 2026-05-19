@@ -34,3 +34,5 @@ Thumbs.db
 
 # Firebase / deploy
 .firebase/
+# Local Netlify folder
+.netlify

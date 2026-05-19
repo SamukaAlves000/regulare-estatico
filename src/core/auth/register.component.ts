@@ -9,7 +9,9 @@ import { MatSelectModule } from '@angular/material/select';
 import { Router } from '@angular/router';
 import { AuthService } from '../services/auth.service';
 import { UsersRepository } from '../services/users.repository';
+import { AuditLogService } from '../services/audit-log.service';
 import { User, UserProfile, UserStatus } from '../models/user.model';
+import { AuditAction } from '../models/audit-log.model';
 
 @Component({
   selector: 'app-register',
@@ -23,6 +25,7 @@ export class RegisterComponent {
   private readonly fb = inject(FormBuilder);
   private readonly auth = inject(AuthService);
   private readonly usersRepo = inject(UsersRepository);
+  private readonly auditLog = inject(AuditLogService);
   private readonly router = inject(Router);
 
   loading = signal(false);
@@ -48,6 +51,7 @@ export class RegisterComponent {
     try {
       const cred = await this.auth.register(email!, password!);
       const uid = cred.user?.uid as string;
+      const now = new Date().toISOString();
       const user: User = {
         id: uid,
         name: name!,
@@ -55,14 +59,35 @@ export class RegisterComponent {
         profile: profile!,
         companyId: (companyId ?? '')!,
         status: status!,
+        active: status === 'ATIVO',
+        createdAt: now,
       };
       await this.usersRepo.set(user);
+      
+      try {
+        await this.auditLog.log({
+          action: AuditAction.USER_REGISTERED,
+          appVersion: '',
+          osVersion: '',
+          details: {
+            profile: user.profile,
+            method: 'register_form'
+          },
+          user_profile: user.profile,
+          userEmail: user.email,
+          userId: user.id
+        });
+      } catch (logErr) {
+        console.error('Erro ao logar registro de usuário:', logErr);
+      }
+
       this.success.set(true);
       // Opcional: navegar para login
       await this.router.navigateByUrl('/login');
     } catch (e: any) {
       const message = this.normalizeError(e);
       this.error.set(message);
+      this.auditLog.logError(AuditAction.USER_REGISTER_ERROR, e, { email: this.form.value.email, name: this.form.value.name });
     } finally {
       this.loading.set(false);
     }

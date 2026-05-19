@@ -1,0 +1,95 @@
+:host {
+  display: block;
+}
+
+.page-container {
+  padding: 16px;
+  max-width: 100%;
+}
+
+// Filtros
+.filters-card {
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.filters-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+
+  &:not(:last-child) {
+    margin-bottom: 8px;
+  }
+}
+
+.filter-field {
+  flex: 1;
+  min-width: 180px;
+  max-width: 220px;
+
+  &.search-field {
+    flex: 2;
+    max-width: 350px;
+  }
+}
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+// Tabela
+.table-container {
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+
+.full-width {
+  width: 100%;
+}
+
+table {
+  width: 100%;
+
+  th {
+    font-weight: 600;
+    color: #333;
+    background-color: #fafafa;
+  }
+
+  td, th {
+    padding: 12px 16px;
+  }
+}
+
+// Responsivo
+@media (max-width: 768px) {
+  .filters-row {
+    flex-direction: column;
+  }
+
+  .filter-field {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .filter-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 8px;
+  }
+}
+
+// Ações em linha
+.actions-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0;
+  justify-content: flex-end;
+}

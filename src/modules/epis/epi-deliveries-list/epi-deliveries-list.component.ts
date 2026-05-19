@@ -156,6 +156,7 @@ export class EpiDeliveriesListComponent implements OnInit, OnDestroy {
           const path = `epis/deliveries/${res.companyId}/${id}/receipt`;
           const url = await this.storage.upload(path, await file.arrayBuffer(), file.type);
           await this.service.updateDelivery(id, { receiptUrl: url, receiptName: file.name });
+          await this.service.logDocumentUpload(id, file.name);
         }
 
         this.snack.open('Entrega registrada com sucesso!', 'OK', { duration: 3000 });
@@ -179,6 +180,7 @@ export class EpiDeliveriesListComponent implements OnInit, OnDestroy {
           const url = await this.storage.upload(path, await file.arrayBuffer(), file.type);
           res.receiptUrl = url;
           res.receiptName = file.name;
+          await this.service.logDocumentUpload(delivery.id, file.name);
         }
 
         await this.service.updateDelivery(delivery.id, res);
