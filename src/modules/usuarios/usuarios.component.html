@@ -151,7 +151,7 @@
                                 (click)="toggleStatus(u)"
                                 [matTooltip]="u.active ? 'Desativar' : 'Ativar'"
                         >
-                            <mat-icon [color]="u.active ? 'accent' : 'warn'">
+                            <mat-icon>
                                 {{ u.active ? 'toggle_on' : 'toggle_off' }}
                             </mat-icon>
                         </button>
@@ -161,7 +161,7 @@
                                 (click)="resendInvite(u)"
                                 matTooltip="Reenviar convite / Redefinir senha"
                         >
-                            <mat-icon color="accent">
+                            <mat-icon>
                                 mail
                             </mat-icon>
                         </button>

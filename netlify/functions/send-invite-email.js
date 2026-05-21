@@ -64,14 +64,24 @@ exports.handler = async (event, context) => {
           url: origin ? `${origin}/login` : 'https://regulare.netlify.app/login',
           handleCodeInApp: true,
         };
-        inviteLink = await admin.auth().generatePasswordResetLink(to, actionCodeSettings);
-        console.log('[DEBUG] Link real do Firebase gerado com sucesso');
+        // Tentar gerar link real. Se falhar, vai para o catch.
+        const realLink = await admin.auth().generatePasswordResetLink(to, actionCodeSettings);
+        inviteLink = realLink;
+        console.log('[DEBUG] Link real do Firebase gerado com sucesso:', inviteLink);
       } catch (linkError) {
         console.warn('[DEBUG] Erro ao gerar link do Firebase (usando fallback):', linkError.message);
-        if (!inviteLink) inviteLink = origin ? `${origin}/login` : 'https://regulare.netlify.app/login';
+        // Se falhar a geração do link real e NÃO recebemos um link do frontend, usamos o login como última opção
+        if (!inviteLink) {
+          inviteLink = origin ? `${origin}/login` : 'https://regulare.netlify.app/login';
+          console.log('[DEBUG] Usando fallback de login:', inviteLink);
+        }
       }
-    } else if (!inviteLink) {
-      inviteLink = origin ? `${origin}/login` : 'https://regulare.netlify.app/login';
+    } else {
+      console.warn('[DEBUG] Firebase Admin não inicializado. Verifique a variável FIREBASE_SERVICE_ACCOUNT.');
+      if (!inviteLink) {
+        inviteLink = origin ? `${origin}/login` : 'https://regulare.netlify.app/login';
+        console.log('[DEBUG] Usando fallback de login (Admin não inicializado):', inviteLink);
+      }
     }
 
     const isReset = type === 'RESET';
@@ -176,8 +186,8 @@ exports.handler = async (event, context) => {
             }</p>
             <div class="button-container"><a href="${inviteLink}" class="button">${actionText}</a></div>
             <p style="margin-top: 30px; font-size: 14px; color: #555;">
-                Se o botão não funcionar, copie este link: <br>
-                <span style="word-break: break-all; color: #007bff;">${inviteLink}</span>
+                Se o botão acima não funcionar, clique no link abaixo ou copie e cole no seu navegador: <br>
+                <a href="${inviteLink}" style="word-break: break-all; color: #007bff; text-decoration: underline;">${inviteLink}</a>
             </p>
         </div>
         <div class="footer">

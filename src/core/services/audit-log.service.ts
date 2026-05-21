@@ -52,6 +52,16 @@ export class AuditLogService extends BaseFirestoreService<any> {
     [AuditAction.EPI_DELIVERY_TERM_DOWNLOADED]: 'Download do termo de responsabilidade de EPI',
 
     [AuditAction.ALERTS_GENERATED]: 'Alertas automáticos gerados pelo sistema',
+    [AuditAction.DOCUMENT_GENERATED]: 'Relatório GRC gerado e registrado no sistema',
+    [AuditAction.DOCUMENT_GENERATION_ERROR]: 'Erro ao gerar relatório GRC',
+
+    [AuditAction.LGPD_TERM_CREATED]: 'Novo termo LGPD criado como rascunho',
+    [AuditAction.LGPD_TERM_UPDATED]: 'Rascunho do termo LGPD atualizado',
+    [AuditAction.LGPD_TERM_PUBLISHED]: 'Termo LGPD publicado',
+    [AuditAction.LGPD_TERM_ACTIVATED]: 'Termo LGPD ativado como versão vigente',
+    [AuditAction.LGPD_TERM_ARCHIVED]: 'Termo LGPD arquivado',
+    [AuditAction.LGPD_TERM_VERSIONED]: 'Nova versão do termo LGPD criada',
+    [AuditAction.LGPD_TERM_ACCEPTED]: 'Usuário aceitou os Termos LGPD',
   };
 
   private readonly session = inject(SessionService);

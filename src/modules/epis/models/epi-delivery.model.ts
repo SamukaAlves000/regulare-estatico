@@ -2,6 +2,9 @@ import { AuditUser } from '../../cadastros/models/company.model';
 import { Equipment } from '../../cadastros/models/equipment.model';
 
 export interface EpiDeliveryItem extends Omit<Equipment, 'id'> {
+    caNumber: string;
+    model: string;
+    brand: string;
   equipmentId: string;
   quantity: number;
   nextExchangeDate: string; // ISO date string ou yyyy-MM-dd para input date

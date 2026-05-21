@@ -13,8 +13,20 @@ export const routes: Routes = [
         loadComponent: () => import('./core/auth/register.component').then(m => m.RegisterComponent)
     },
     {
+        path: 'recuperar-senha',
+        loadComponent: () => import('./core/auth/forgot-password.component').then(m => m.ForgotPasswordComponent)
+    },
+    {
         path: 'assinatura/:entregaId',
         loadComponent: () => import('./modules/epis/assinatura-entrega/assinatura-entrega.component').then(m => m.AssinaturaEntregaComponent)
+    },
+    {
+        path: 'relatorio-grc/:companyId',
+        loadComponent: () => import('./modules/dashboard/grc-report-public.component').then(m => m.GrcReportPublicComponent)
+    },
+    {
+        path: 'validate/:hash',
+        loadComponent: () => import('./modules/validate/validate-document.component').then(m => m.ValidateDocumentComponent)
     },
     {
         path: 'app',
@@ -53,6 +65,12 @@ export const routes: Routes = [
                 canActivate: [RoleGuard],
                 data: {roles: ['ADMIN'] as const},
                 loadChildren: () => import('./modules/usuarios/usuarios.routes').then(m => m.routes)
+            },
+            {
+                path: 'lgpd',
+                canActivate: [RoleGuard],
+                data: {roles: ['ADMIN'] as const},
+                loadChildren: () => import('./modules/lgpd/lgpd.routes').then(m => m.routes)
             },
         ]
     },

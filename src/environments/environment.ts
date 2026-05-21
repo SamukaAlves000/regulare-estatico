@@ -1,5 +1,6 @@
 export const environment = {
   production: false,
+  appUrl: 'https://plataforma-regulare.netlify.app',
   firebase: {
       apiKey: "AIzaSyDcpTzXQC-2Bba94FnttX873cl8MK4WcSA",
       authDomain: "sysmvnregulare.firebaseapp.com",

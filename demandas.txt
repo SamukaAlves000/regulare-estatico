@@ -1,4 +1,0 @@
-1 - Controle de usuários por empresa.
-2 - Relatório gerencial.
-3 - Logs gerais. OK
-4 - Termo de aceite de uso do sistema.

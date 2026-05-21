@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { Firestore, collection, query, where, getDocs, orderBy, limit, startAfter, doc, updateDoc } from '@angular/fire/firestore';
+import { Firestore, collection, query, where, getDocs, limit, startAfter, doc, updateDoc } from '@angular/fire/firestore';
 import { Auth, sendPasswordResetEmail, ActionCodeSettings } from '@angular/fire/auth';
 import { initializeApp as firebaseInitApp, deleteApp, FirebaseApp } from 'firebase/app';
 import { getAuth as getFirebaseAuth, createUserWithEmailAndPassword as firebaseCreateUser } from 'firebase/auth';
@@ -33,9 +33,9 @@ export class UsuariosService {
     let q;
 
     if (filters.companyId) {
-      q = query(usersCol, where('companyId', '==', filters.companyId), limit(pageSize));
+      q = query(usersCol, where('companyId', '==', filters.companyId), where('profile', '==', 'CLIENTE'), limit(pageSize));
     } else {
-      q = query(usersCol, orderBy('name'), limit(pageSize));
+      q = query(usersCol, where('profile', '==', 'CLIENTE'), limit(pageSize));
     }
 
     if (lastDoc) {
@@ -43,9 +43,10 @@ export class UsuariosService {
     }
 
     const snapshot = await getDocs(q);
-    let users = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
+    let users = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User))
+      .filter(u => u.profile === 'CLIENTE')
+      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
-    // Client-side filtering for name/email because Firestore doesn't support complex text search easily without indexes or dedicated services
     if (filters.name) {
       const term = filters.name.toLowerCase();
       users = users.filter(u => u.name.toLowerCase().includes(term));
@@ -103,10 +104,12 @@ export class UsuariosService {
         
         // 3.1 Firebase Reset (Backup)
         try {
+          // Tentamos o envio padrão do Firebase apenas como redundância.
+          // Se falhar (ex: erro 400 por domínio não autorizado), ignoramos e seguimos com o e-mail profissional.
           await sendPasswordResetEmail(this.auth, input.email, actionCodeSettings);
           console.log(`[DEBUG] Reset de senha do Firebase disparado (backup) para: ${input.email}`);
         } catch (fbAuthError: any) {
-          console.warn(`[DEBUG] Firebase Auth reset backup failed:`, fbAuthError);
+          console.warn(`[DEBUG] Firebase Auth backup ignorado ou falhou (comum em localhost):`, fbAuthError.message);
         }
         
         // 3.2 Professional Invite (Principal)
@@ -217,9 +220,9 @@ export class UsuariosService {
       // 1. Tentar Firebase Auth (Backup silencioso)
       try {
         await sendPasswordResetEmail(this.auth, email, actionCodeSettings);
-        console.log(`[DEBUG] Firebase Auth reset disparado (pode demorar ou cair no spam).`);
+        console.log(`[DEBUG] Firebase Auth reset disparado via backup.`);
       } catch (fbAuthError: any) {
-        console.warn(`[DEBUG] Falha no Firebase Auth reset:`, fbAuthError);
+        console.warn(`[DEBUG] Falha ou bloqueio no Firebase Auth backup (ignorado):`, fbAuthError.message);
       }
 
       // 2. DISPARAR SEMPRE o e-mail profissional via Netlify (Garante a entrega visual)

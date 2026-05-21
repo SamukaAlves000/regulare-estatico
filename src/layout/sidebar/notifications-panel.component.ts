@@ -98,7 +98,7 @@ export class NotificationsPanelComponent {
         dialogData = { ...sn.data(), id: sn.id, isEdit: true, companies };
 
       } else if (originType === 'condicionante') {
-        const docRef = doc(this.firestore, 'license_conditions', alert.origemId);
+        const docRef = doc(this.firestore, 'licenseConditions', alert.origemId);
         const sn = await getDoc(docRef);
         if (!sn.exists()) throw new Error('Condicionante não encontrada');
         

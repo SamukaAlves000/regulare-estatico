@@ -8,22 +8,28 @@ export interface AgendaItem {
   daysRemaining?: number;
 }
 
+// dashboard.model.ts
+// dashboard.model.ts
 export interface DashboardStats {
-  licenses: {
-    emDia: number;
-    aVencer: number;
-    vencidas: number;
-  };
-  conditions: {
-    cumpridas: number;
-    pendentes: number;
-    vencidas: number;
-  };
-  epis: {
-    ok: number;
-    aVencer: number;
-    vencidas: number;
-  };
-  agenda: AgendaItem[];
-  upcoming: AgendaItem[];
+    licenses: {
+        total: number;
+        emDia: number;
+        aVencer: number;
+        vencidas: number;
+    };
+    conditions: {
+        total: number;
+        cumpridas: number;
+        aVencer: number;
+        vencidas: number;
+        pendentes: number;
+    };
+    epis: {
+        total: number;
+        ok: number;
+        aVencer: number;
+        vencidas: number;
+    };
+    agenda: AgendaItem[];
+    upcoming: AgendaItem[];
 }

@@ -1,5 +1,5 @@
 [build]
-  publish = "dist/regulare-estatico"
+  publish = "dist/regulare-estatico/browser"
   functions = "netlify/functions"
 
 [dev]

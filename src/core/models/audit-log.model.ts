@@ -133,6 +133,22 @@ export enum AuditAction {
   // Invites
   INVITE_EMAIL_SENT = 'invite_email_sent',
   INVITE_EMAIL_ERROR = 'invite_email_error',
+
+  // Documents
+  DOCUMENT_GENERATED = 'document_generated',
+  DOCUMENT_GENERATION_ERROR = 'document_generation_error',
+
+  // Password Reset (self-service)
+  PASSWORD_RESET_REQUESTED = 'password_reset_requested',
+
+  // LGPD Terms
+  LGPD_TERM_CREATED = 'lgpd_term_created',
+  LGPD_TERM_UPDATED = 'lgpd_term_updated',
+  LGPD_TERM_PUBLISHED = 'lgpd_term_published',
+  LGPD_TERM_ACTIVATED = 'lgpd_term_activated',
+  LGPD_TERM_ARCHIVED = 'lgpd_term_archived',
+  LGPD_TERM_VERSIONED = 'lgpd_term_versioned',
+  LGPD_TERM_ACCEPTED = 'lgpd_term_accepted',
 }
 
 export interface AuditLog {
