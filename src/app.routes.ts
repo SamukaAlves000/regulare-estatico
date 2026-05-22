@@ -21,6 +21,10 @@ export const routes: Routes = [
         loadComponent: () => import('./modules/epis/assinatura-entrega/assinatura-entrega.component').then(m => m.AssinaturaEntregaComponent)
     },
     {
+        path: 'relatorio-entrega-epi/:entregaId',
+        loadComponent: () => import('./modules/epis/relatorio-entrega-epi/relatorio-entrega-epi.component').then(m => m.RelatorioEntregaEpiComponent)
+    },
+    {
         path: 'relatorio-grc/:companyId',
         loadComponent: () => import('./modules/dashboard/grc-report-public.component').then(m => m.GrcReportPublicComponent)
     },

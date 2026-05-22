@@ -141,12 +141,43 @@ export class GrcReportService {
         return snap.exists();
     }
 
-    async generateReport(companyId: string, unitId?: string): Promise<void> {
-        const user = this.session.user();
-        const emitterName    = user?.name    ?? user?.email ?? 'sistema';
-        const emitterEmail   = user?.email   ?? 'sistema';
-        const emitterUserId  = user?.id      ?? 'sistema';
-        const emitterProfile = user?.profile ?? 'sistema';
+    async generateReport(companyId: string, unitId?: string, idUsuarioLogado?: string): Promise<void> {
+        let emitterName = 'sistema';
+        let emitterEmail = 'sistema';
+        let emitterUserId = 'sistema';
+        let emitterProfile = 'sistema';
+
+        // Se passou idUsuarioLogado, buscar dados do usuário na coleção users
+        if (idUsuarioLogado) {
+            try {
+                const userDoc = await getDoc(doc(this.firestore, 'users', idUsuarioLogado));
+                if (userDoc.exists()) {
+                    const userData = userDoc.data();
+                    // @ts-ignore
+                    emitterName = userData?.name || userData?.email || 'sistema';
+                    // @ts-ignore
+                    emitterEmail = userData?.email || 'sistema';
+                    emitterUserId = idUsuarioLogado;
+                    // @ts-ignore
+                    emitterProfile = userData?.profile || 'sistema';
+                }
+            } catch (error) {
+                console.warn('[GrcReportService] Erro ao buscar usuário por ID, usando sessão atual:', error);
+                // Fallback para sessão atual se falhar
+                const user = this.session.user();
+                emitterName = user?.name ?? user?.email ?? 'sistema';
+                emitterEmail = user?.email ?? 'sistema';
+                emitterUserId = user?.id ?? 'sistema';
+                emitterProfile = user?.profile ?? 'sistema';
+            }
+        } else {
+            // Usar dados da sessão atual
+            const user = this.session.user();
+            emitterName = user?.name ?? user?.email ?? 'sistema';
+            emitterEmail = user?.email ?? 'sistema';
+            emitterUserId = user?.id ?? 'sistema';
+            emitterProfile = user?.profile ?? 'sistema';
+        }
 
         try {
             // 1. Código sequencial único (REL-GRC-2026-0509-001)
