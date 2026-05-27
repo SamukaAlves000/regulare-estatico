@@ -48,6 +48,7 @@ export class SidebarComponent {
     { label: 'Alertas', icon: 'notifications', path: '/app/alertas' },
     { label: 'Cadastros', icon: 'library_books', path: '/app/cadastros', roles: ['ADMIN', 'CLIENTE'] },
     { label: 'Usuários', icon: 'people', path: '/app/usuarios', roles: ['ADMIN'] },
+    { label: 'Termos LGPD', icon: 'policy', path: '/app/lgpd', roles: ['ADMIN'] },
   ] as const;
 
   readonly visibleMenu = computed(() => {

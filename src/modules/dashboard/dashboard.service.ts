@@ -1,163 +1,318 @@
 import { Injectable, inject } from '@angular/core';
 import { Firestore, collection, query, where, getDocs } from '@angular/fire/firestore';
 import { DashboardStats, AgendaItem } from './dashboard.model';
-import { License, LicenseCondition, calculateLicenseStatus, calculateConditionStatus } from '../licencas/models/license.model';
+import { License, LicenseCondition } from '../licencas/models/license.model';
 import { EpiDelivery } from '../epis/models/epi-delivery.model';
 
 @Injectable({ providedIn: 'root' })
 export class DashboardService {
-  private readonly firestore = inject(Firestore);
+    private readonly firestore = inject(Firestore);
 
-  async getStats(companyId?: string): Promise<DashboardStats> {
-    const id = (companyId === 'admin' || !companyId) ? undefined : companyId;
-
-    const [licenses, conditions, epis] = await Promise.all([
-      this.fetchData<License>('licenses', id),
-      this.fetchData<LicenseCondition>('license_conditions', id),
-      this.fetchData<EpiDelivery>('epi_deliveries', id)
-    ]);
-
-    // 1. Mapeia Licenças para Agenda
-    const licenseItems: AgendaItem[] = licenses.map((l: any) => ({
-      id: l.id,
-      date: l.expirationDate,
-      type: 'Licença',
-      document: l.documentType || 'Licença',
-      companyName: l.companyName || 'N/A',
-      status: this.mapStatus(calculateLicenseStatus(l.expirationDate)),
-      daysRemaining: this.calculateDaysRemaining(l.expirationDate)
-    }));
-
-    // 2. Mapeia Condicionantes para Agenda
-    const conditionItems: AgendaItem[] = conditions.map((c: any) => ({
-      id: c.id, // Usa o ID da própria condicionante para permitir a abertura do modal correto
-      date: c.dueDate,
-      type: 'Condicionante',
-      document: c.description || 'Condicionante',
-      companyName: c.companyName || 'N/A',
-      status: c.status === 'cumprida' ? 'Cumprida' : this.mapStatus(calculateConditionStatus(c.dueDate)),
-      daysRemaining: this.calculateDaysRemaining(c.dueDate)
-    }));
-
-    // 3. Mapeia EPIs (Validade do CA dos itens das entregas) para Agenda
-    const epiItems: AgendaItem[] = [];
-    epis.forEach(delivery => {
-      delivery.items?.forEach((item: any) => {
-        epiItems.push({
-          id: delivery.id,
-          date: item.validUntil,
-          type: 'EPI',
-          document: item.name,
-          companyName: delivery.companyName || 'N/A',
-          status: this.isExpired(item.validUntil) ? 'Vencida' : 'Em dia',
-          daysRemaining: this.calculateDaysRemaining(item.validUntil)
-        });
-      });
-    });
-
-    // Consolida e ordena por data
-    const allItems = [...licenseItems, ...conditionItems, ...epiItems]
-      .filter(i => !!i.date)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    const upcoming = allItems.filter(i => i.status === 'A vencer' || i.status === 'Vencida').slice(0, 10);
-    const fullAgenda = allItems.slice(0, 5);
-
-    return {
-      licenses: {
-        emDia: licenses.filter((l: License) => calculateLicenseStatus(l.expirationDate) === 'em_dia').length,
-        aVencer: licenses.filter((l: License) => calculateLicenseStatus(l.expirationDate) === 'a_vencer').length,
-        vencidas: licenses.filter((l: License) => calculateLicenseStatus(l.expirationDate) === 'vencida').length,
-      },
-      conditions: {
-        cumpridas: conditions.filter((c: LicenseCondition) => c.status === 'cumprida').length,
-        pendentes: conditions.filter((c: LicenseCondition) => calculateConditionStatus(c.dueDate) === 'pendente' || calculateConditionStatus(c.dueDate) === 'a_vencer').length,
-        vencidas: conditions.filter((c: LicenseCondition) => calculateConditionStatus(c.dueDate) === 'vencida').length,
-      },
-      epis: {
-        // Exemplo simplificado baseado na validade do CA dos itens entregues
-        ok: epis.filter((e: EpiDelivery) => e.items && e.items.length > 0 && e.items.every((i: any) => !this.isExpired(i.validUntil))).length,
-        aVencer: 0, // Lógica de 'a vencer' para EPI depende de regra de negócio (ex: 30 dias antes da troca)
-        vencidas: epis.filter((e: EpiDelivery) => e.items?.some((i: any) => this.isExpired(i.validUntil))).length || 0,
-      },
-      agenda: fullAgenda,
-      upcoming: upcoming
-    };
-  }
-
-  private mapStatus(s: string): any {
-    if (s === 'em_dia') return 'Em dia';
-    if (s === 'a_vencer') return 'A vencer';
-    if (s === 'vencida') return 'Vencida';
-    return 'Pendente';
-  }
-
-  private async fetchData<T>(collectionPath: string, companyId?: string): Promise<T[]> {
-    const col = collection(this.firestore, collectionPath);
-    const constraints: any[] = [];
-    
-    // Removido o filtro de 'deleted' por padrão, pois se o campo não existir no doc, 
-    // o Firestore exclui o registro do resultado. Filtramos manualmente no map.
-    
-    // Adiciona o filtro apenas se o ID for válido, evitando o erro de 'undefined' no where()
-    if (companyId) {
-      constraints.push(where('companyId', '==', companyId));
+    // ===========================================================================
+    // MESMOS HELPERS DO GrcReportService
+    // ===========================================================================
+    private startOfDay(d: Date): Date {
+        const r = new Date(d);
+        r.setHours(0, 0, 0, 0);
+        return r;
     }
 
-    const q = query(col, ...constraints);
-    const sn = await getDocs(q);
-    
-    // Filtramos documentos deletados em memória para garantir que registros sem o campo 'deleted' apareçam
-    return sn.docs
-      .map(d => ({ id: d.id, ...d.data() } as any))
-      .filter(doc => doc.deleted !== true) as T[];
-  }
+    private addDays(d: Date, n: number): Date {
+        const r = new Date(d);
+        r.setDate(r.getDate() + n);
+        return r;
+    }
 
-  private calculateDaysRemaining(dateStr?: string): number | undefined {
-    if (!dateStr) return undefined;
-    try {
-      let date: Date;
-      if (dateStr.includes('/')) {
-        const [d, m, y] = dateStr.split('/').map(Number);
-        date = new Date(y, m - 1, d);
-      } else {
-        date = new Date(dateStr);
-      }
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      const diffTime = date.getTime() - today.getTime();
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    } catch { return undefined; }
-  }
+    private parseDate(dateStr: string | undefined): Date {
+        if (!dateStr) return new Date();
 
-  private isExpired(dateStr?: string): boolean {
-    if (!dateStr) return false;
-    try {
-      // Tenta tratar DD/MM/YYYY ou YYYY-MM-DD
-      let date: Date;
-      if (dateStr.includes('/')) {
-        const [d, m, y] = dateStr.split('/').map(Number);
-        date = new Date(y, m - 1, d);
-      } else {
-        date = new Date(dateStr);
-      }
-      
-      if (isNaN(date.getTime())) return false;
-      
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      
-      return date.getTime() < today.getTime();
-    } catch { return false; }
-  }
+        if (typeof dateStr === 'string' && dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+            const [year, month, day] = dateStr.split('T')[0].split('-').map(Number);
+            return new Date(year, month - 1, day);
+        }
 
-  private getEmptyStats(): DashboardStats {
-    return {
-      licenses: { emDia: 0, aVencer: 0, vencidas: 0 },
-      conditions: { cumpridas: 0, pendentes: 0, vencidas: 0 },
-      epis: { ok: 0, aVencer: 0, vencidas: 0 },
-      agenda: [],
-      upcoming: []
-    };
-  }
+        if (dateStr.includes('/')) {
+            const [d, m, y] = dateStr.split('/').map(Number);
+            return new Date(y, m - 1, d);
+        }
+
+        const parsedDate = new Date(dateStr);
+        const currentYear = new Date().getFullYear();
+        if (isNaN(parsedDate.getTime()) || parsedDate.getFullYear() > currentYear + 10) {
+            return new Date();
+        }
+        return parsedDate;
+    }
+
+    private daysDiff(dateStr: string | undefined): number {
+        if (!dateStr) return 0;
+        const d = this.startOfDay(this.parseDate(dateStr));
+        const today = this.startOfDay(new Date());
+        return Math.round((d.getTime() - today.getTime()) / 86_400_000);
+    }
+
+    // ===========================================================================
+    // CÁLCULO DE STATUS (MESMA LÓGICA DO GRC)
+    // ===========================================================================
+    private getLicenseStatus(expirationDate: string | undefined): 'em_dia' | 'a_vencer' | 'vencida' {
+        if (!expirationDate) return 'em_dia';
+
+        const today = this.startOfDay(new Date());
+        const limit30 = this.addDays(today, 30);
+        const expDate = this.parseDate(expirationDate);
+
+        if (expDate < today) return 'vencida';
+        if (expDate <= limit30) return 'a_vencer';
+        return 'em_dia';
+    }
+
+    private getConditionStatus(dueDate: string | undefined, firestoreStatus: string): string {
+        if (firestoreStatus === 'cumprida') return 'cumprida';
+        if (!dueDate) return 'pendente';
+
+        const today = this.startOfDay(new Date());
+        const limit30 = this.addDays(today, 30);
+        const dueDateObj = this.parseDate(dueDate);
+
+        if (dueDateObj < today) return 'vencida';
+        if (dueDateObj <= limit30) return 'a_vencer';
+        return 'pendente';
+    }
+
+    private getDeliveryStatus(delivery: EpiDelivery): 'ok' | 'a_vencer' | 'vencido' {
+        const today = this.startOfDay(new Date());
+        const limit30 = this.addDays(today, 30);
+
+        let temVencido = false;
+        let temAVencer = false;
+
+        delivery.items?.forEach(item => {
+            const expDate = this.parseDate(item.epiExpirationDate);
+            if (expDate < today) {
+                temVencido = true;
+            } else if (expDate <= limit30) {
+                temAVencer = true;
+            }
+        });
+
+        if (temVencido) return 'vencido';
+        if (temAVencer) return 'a_vencer';
+        return 'ok';
+    }
+
+    // ===========================================================================
+    // BUSCA DE DADOS
+    // ===========================================================================
+    private async fetchData<T>(collectionPath: string, companyId?: string): Promise<T[]> {
+        const col = collection(this.firestore, collectionPath);
+        const constraints: any[] = [];
+
+        if (companyId) {
+            constraints.push(where('companyId', '==', companyId));
+        }
+
+        const q = query(col, ...constraints);
+        const sn = await getDocs(q);
+
+        // Retorna TODOS os documentos, filtra deleted APÓS a busca
+        return sn.docs
+            .map(d => ({ id: d.id, ...d.data() } as any))
+            .filter(doc => doc.deleted !== true) as T[];
+    }
+
+    // ===========================================================================
+    // MÉTODO PRINCIPAL
+    // ===========================================================================
+    async getStats(companyId?: string): Promise<DashboardStats> {
+        const id = (companyId === 'admin' || !companyId) ? undefined : companyId;
+
+        const [licenses, conditions, epiDeliveries] = await Promise.all([
+            this.fetchData<License>('licenses', id),
+            this.fetchData<LicenseCondition>('licenseConditions', id),
+            this.fetchData<EpiDelivery>('epi_deliveries', id)
+        ]);
+
+        console.log('[DashboardService] 📊 Licenças encontradas:', licenses.length);
+        console.log('[DashboardService] 📋 Condicionantes encontradas:', conditions.length);
+        console.log('[DashboardService] 🥾 EPIs encontrados:', epiDeliveries.length);
+
+        // ========================================================================
+        // 1. ESTATÍSTICAS DE LICENÇAS
+        // ========================================================================
+        let licEmDia = 0;
+        let licAVencer = 0;
+        let licVencidas = 0;
+
+        licenses.forEach(lic => {
+            const status = this.getLicenseStatus(lic.expirationDate);
+            if (status === 'em_dia') licEmDia++;
+            else if (status === 'a_vencer') licAVencer++;
+            else licVencidas++;
+        });
+
+        console.log('[DashboardService] Licenças: Em Dia=', licEmDia, 'A Vencer=', licAVencer, 'Vencidas=', licVencidas);
+
+        // ========================================================================
+        // 2. ESTATÍSTICAS DE CONDICIONANTES
+        // ========================================================================
+        let condCumpridas = 0;
+        let condAVencer = 0;
+        let condVencidas = 0;
+        let condPendentes = 0;
+
+        conditions.forEach(cond => {
+            const status = this.getConditionStatus(cond.dueDate, cond.status);
+            if (status === 'cumprida') condCumpridas++;
+            else if (status === 'a_vencer') condAVencer++;
+            else if (status === 'vencida') condVencidas++;
+            else condPendentes++;
+        });
+
+        // ========================================================================
+        // 3. ESTATÍSTICAS DE EPIs
+        // ========================================================================
+        let epiOk = 0;
+        let epiAVencer = 0;
+        let epiVencidos = 0;
+
+        epiDeliveries.forEach(delivery => {
+            const status = this.getDeliveryStatus(delivery);
+            if (status === 'ok') epiOk++;
+            else if (status === 'a_vencer') epiAVencer++;
+            else epiVencidos++;
+        });
+
+        console.log('[DashboardService] EPIs: OK=', epiOk, 'A Vencer=', epiAVencer, 'Vencidos=', epiVencidos);
+
+        // ========================================================================
+        // 4. ITENS PARA AGENDA
+        // ========================================================================
+        const agendaItems: AgendaItem[] = [];
+
+        // Licenças
+        licenses.forEach(lic => {
+            const status = this.getLicenseStatus(lic.expirationDate);
+            const displayStatus = this.mapStatusToDisplay(status);
+            const days = this.daysDiff(lic.expirationDate);
+
+            agendaItems.push({
+                id: lic.id,
+                date: lic.expirationDate || '',
+                type: 'Licença',
+                document: lic.documentType || 'Licença',
+                // @ts-ignore
+                companyName: lic.companyName || 'N/A',
+                // @ts-ignore
+                status: displayStatus,
+                daysRemaining: days
+            });
+        });
+
+        // Condicionantes
+        conditions.forEach(cond => {
+            const status = this.getConditionStatus(cond.dueDate, cond.status);
+            const displayStatus = this.mapStatusToDisplay(status);
+            const days = this.daysDiff(cond.dueDate);
+
+            agendaItems.push({
+                id: cond.id,
+                date: cond.dueDate || '',
+                type: 'Condicionante',
+                document: cond.description || 'Condicionante',
+                // @ts-ignore
+                companyName: cond.companyName || 'N/A',
+                // @ts-ignore
+                status: displayStatus,
+                daysRemaining: days
+            });
+        });
+
+        // EPIs
+        epiDeliveries.forEach(delivery => {
+            const status = this.getDeliveryStatus(delivery);
+            const displayStatus = this.mapStatusToDisplay(status);
+
+            let piorData: string | undefined;
+            let piorDays: number = Infinity;
+
+            delivery.items?.forEach(item => {
+                const days = this.daysDiff(item.epiExpirationDate);
+                if (days < piorDays) {
+                    piorDays = days;
+                    piorData = item.epiExpirationDate;
+                }
+            });
+
+            agendaItems.push({
+                id: delivery.id,
+                date: piorData || '',
+                type: 'EPI',
+                document: `EPI - ${delivery.employeeName || 'Entrega'}`,
+                companyName: delivery.companyName || 'N/A',
+                // @ts-ignore
+                status: displayStatus,
+                daysRemaining: piorDays !== Infinity ? piorDays : undefined
+            });
+        });
+
+        // Ordena por data
+        const sortedItems = agendaItems
+            .filter(i => !!i.date)
+            .sort((a, b) => {
+                const dateA = this.parseDate(a.date);
+                const dateB = this.parseDate(b.date);
+                return dateA.getTime() - dateB.getTime();
+            });
+
+        const upcoming = sortedItems.filter(i => i.status === 'A vencer' || i.status === 'Vencida').slice(0, 10);
+        const fullAgenda = sortedItems.slice(0, 5);
+
+        // ========================================================================
+        // 5. RETORNO - GARANTINDO QUE TODOS OS CAMPOS EXISTEM
+        // ========================================================================
+        const result: DashboardStats = {
+            licenses: {
+                total: licenses.length,
+                emDia: licEmDia,
+                aVencer: licAVencer,
+                vencidas: licVencidas
+            },
+            conditions: {
+                total: conditions.length,
+                cumpridas: condCumpridas,
+                aVencer: condAVencer,
+                vencidas: condVencidas,
+                pendentes: condPendentes
+            },
+            epis: {
+                total: epiDeliveries.length,
+                ok: epiOk,
+                aVencer: epiAVencer,
+                vencidas: epiVencidos
+            },
+            agenda: fullAgenda,
+            upcoming: upcoming
+        };
+
+        console.log('[DashboardService] Resultado final:', result);
+        console.log('[DashboardService] Total Geral:', result.licenses.total + result.conditions.total + result.epis.total);
+
+        return result;
+    }
+
+    // ===========================================================================
+    // HELPERS
+    // ===========================================================================
+    private mapStatusToDisplay(status: string): string {
+        switch (status) {
+            case 'em_dia': return 'Em dia';
+            case 'a_vencer': return 'A vencer';
+            case 'vencida': return 'Vencida';
+            case 'vencido': return 'Vencido';
+            case 'cumprida': return 'Cumprida';
+            case 'pendente': return 'Pendente';
+            case 'ok': return 'Em dia';
+            default: return status;
+        }
+    }
 }

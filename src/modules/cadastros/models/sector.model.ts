@@ -2,6 +2,7 @@ export interface AuditUser {
   uid: string;
   name: string;
   email: string;
+  profile?: string;
 }
 
 export type SectorStatus = 'active' | 'inactive';

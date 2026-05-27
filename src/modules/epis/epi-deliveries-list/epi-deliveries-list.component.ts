@@ -156,6 +156,7 @@ export class EpiDeliveriesListComponent implements OnInit, OnDestroy {
           const path = `epis/deliveries/${res.companyId}/${id}/receipt`;
           const url = await this.storage.upload(path, await file.arrayBuffer(), file.type);
           await this.service.updateDelivery(id, { receiptUrl: url, receiptName: file.name });
+          await this.service.logDocumentUpload(id, file.name);
         }
 
         this.snack.open('Entrega registrada com sucesso!', 'OK', { duration: 3000 });
@@ -179,6 +180,7 @@ export class EpiDeliveriesListComponent implements OnInit, OnDestroy {
           const url = await this.storage.upload(path, await file.arrayBuffer(), file.type);
           res.receiptUrl = url;
           res.receiptName = file.name;
+          await this.service.logDocumentUpload(delivery.id, file.name);
         }
 
         await this.service.updateDelivery(delivery.id, res);
@@ -222,13 +224,29 @@ export class EpiDeliveriesListComponent implements OnInit, OnDestroy {
     });
   }
 
-  formatDate(dateStr: string): string {
-    if (!dateStr) return '-';
-    try {
-      const d = new Date(dateStr);
-      return d.toLocaleDateString('pt-BR');
-    } catch {
-      return dateStr;
+    formatDate(dateStr: string): string {
+        if (!dateStr) return '-';
+        try {
+            // CORREÇÃO: Para datas no formato ISO (YYYY-MM-DD), extrair ano, mês e dia manualmente
+            // evitando a conversão de timezone que o Date() faz automaticamente
+
+            // Verifica se é formato ISO (YYYY-MM-DD)
+            if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+                const [year, month, day] = dateStr.split('T')[0].split('-').map(Number);
+                return `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
+            }
+
+            // Para datas no formato DD/MM/YYYY já formatadas
+            if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}/)) {
+                return dateStr;
+            }
+
+            // Fallback: tenta converter normalmente
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr;
+            return d.toLocaleDateString('pt-BR');
+        } catch {
+            return dateStr;
+        }
     }
-  }
 }

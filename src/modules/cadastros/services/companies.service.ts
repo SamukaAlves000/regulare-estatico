@@ -4,6 +4,8 @@ import { CompaniesRepository } from '../repositories/companies.repository';
 import { Company, AuditUser, CompanyCnae } from '../models/company.model';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 import { initializeApp as firebaseInitApp, deleteApp, FirebaseApp } from 'firebase/app';
 import { getAuth as getFirebaseAuth, createUserWithEmailAndPassword as firebaseCreateUser, deleteUser as firebaseDeleteUser } from 'firebase/auth';
 import { environment } from '../../../environments/environment';
@@ -51,7 +53,8 @@ export class CompaniesService {
   constructor(
     private readonly repo: CompaniesRepository,
     private readonly session: SessionService,
-    private readonly usersRepo: UsersRepository
+    private readonly usersRepo: UsersRepository,
+    private readonly auditLog: AuditLogService
   ) {}
 
   private isAdmin(): boolean {
@@ -94,7 +97,7 @@ export class CompaniesService {
 
         const loggedUid = this.getUid();
         const loggedUser = await this.usersRepo.get(loggedUid);
-        const createdBy = {uid: loggedUid, name: loggedUser?.name ?? '', email: loggedUser?.email ?? ''};
+        const createdBy: AuditUser = { uid: loggedUid, name: loggedUser?.name ?? '', email: loggedUser?.email ?? '', profile: loggedUser?.profile };
 
         const company: Company = {
             id,
@@ -158,10 +161,27 @@ export class CompaniesService {
         createdBy: loggedUid,
       };
 
+    try {
       await this.usersRepo.set(userDoc as any);
-
       // Persist company document
       await this.repo.create(company);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.COMPANY_CLIENT_CREATE_ERROR, createError, { companyName: company.razaoSocial, clientEmail: input.email });
+      throw createError;
+    }
+
+    try {
+        await this.auditLog.log({
+          action: AuditAction.COMPANY_CLIENT_CREATED,
+          appVersion: '',
+          osVersion: '',
+          user_profile: loggedUser?.profile || 'UNKNOWN',
+          userEmail: loggedUser?.email ?? '',
+          userId: loggedUid,
+          details: { companyId: id, companyName: company.razaoSocial, clientUserEmail: input.email }
+        });
+      } catch (e) { console.error('Audit error:', e); }
+
       this.companyCreatedSource.next();
 
       return id;
@@ -197,7 +217,7 @@ export class CompaniesService {
 
         const uid = this.getUid();
         const user = await this.usersRepo.get(uid);
-        const audit: AuditUser = {uid, name: user?.name ?? '', email: user?.email ?? ''};
+        const audit: AuditUser = {uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile};
         const now = new Date().toISOString();
         const id = `comp_${makeId()}`;
 
@@ -237,7 +257,25 @@ export class CompaniesService {
             cnpj: input.cnpj ?? input.document ?? '',
         };
 
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.COMPANY_CREATE_ERROR, createError, { companyName: doc.razaoSocial });
+      throw createError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_CREATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { companyId: id, companyName: doc.razaoSocial }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     this.companyCreatedSource.next();
     return id;
   }
@@ -254,7 +292,7 @@ export class CompaniesService {
     const now = new Date().toISOString();
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
 
     const safePatch: Partial<Company> = {
       ...patch,
@@ -274,7 +312,25 @@ export class CompaniesService {
     if (safePatch.razaoSocial && !safePatch.name) safePatch.name = safePatch.razaoSocial;
     if (safePatch.document && !safePatch.cnpj) safePatch.cnpj = safePatch.document;
 
-    await this.repo.updateCompany(id, safePatch);
+    try {
+      await this.repo.updateCompany(id, safePatch);
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.COMPANY_UPDATE_ERROR, updateError, { companyId: id, patch: safePatch });
+      throw updateError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: updatedBy.email,
+        userId: updatedBy.uid,
+        details: { companyId: id, patch: safePatch }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     this.companyCreatedSource.next();
   }
 
@@ -283,7 +339,27 @@ export class CompaniesService {
     if (!this.isAdmin()) {
       throw new Error('Apenas ADMIN pode ativar/inativar empresas.');
     }
-    await this.repo.updateCompany(id, { status: ativo ? 'ativo' : 'inativo' });
+    try {
+      await this.repo.updateCompany(id, { status: ativo ? 'ativo' : 'inativo' });
+    } catch (statusError) {
+      await this.auditLog.logError(AuditAction.COMPANY_STATUS_ERROR, statusError, { companyId: id, status: ativo ? 'ativo' : 'inativo' });
+      throw statusError;
+    }
+
+    try {
+      const uid = this.getUid();
+      const user = await this.usersRepo.get(uid);
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_STATUS_CHANGED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: (user as any)?.profile || 'UNKNOWN',
+        userEmail: user?.email ?? '',
+        userId: uid,
+        details: { companyId: id, status: ativo ? 'ativo' : 'inativo' }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     this.companyCreatedSource.next();
   }
 
@@ -329,7 +405,25 @@ export class CompaniesService {
       const myCompanyId = this.getLoggedCompanyId();
       if (!myCompanyId || id !== myCompanyId) return null;
     }
-    return this.repo.getById(id);
+    const company = await this.repo.getById(id);
+
+    if (company) {
+      try {
+        const uid = this.getUid();
+        const user = await this.usersRepo.get(uid);
+        await this.auditLog.log({
+          action: 'company_viewed',
+          appVersion: '',
+          osVersion: '',
+          user_profile: (user as any)?.profile || 'UNKNOWN',
+          userEmail: user?.email ?? '',
+          userId: uid,
+          details: { companyId: id, companyName: company.razaoSocial }
+        });
+      } catch (e) { console.error('Audit error:', e); }
+    }
+
+    return company;
   }
 
   private getUid(): string {

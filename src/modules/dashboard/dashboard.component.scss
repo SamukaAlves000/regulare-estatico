@@ -6,6 +6,39 @@
   background-color: #f8fafc;
   min-height: 100vh;
 
+  .dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+
+    .page-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1e293b;
+      margin: 0;
+    }
+
+    .report-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+      }
+
+      @media (max-width: 600px) {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  }
+
   .page-title {
     font-size: 1.5rem;
     font-weight: 700;
@@ -185,5 +218,22 @@
       min-width: 40px;
       color: #1e293b;
     }
+  }
+}
+
+// dashboard.component.scss
+
+.total-row {
+  background-color: #f5f7fa;
+  border-top: 2px solid #dde3ea;
+  font-weight: bold;
+
+  td {
+    padding: 12px 8px;
+    border-top: 2px solid #dde3ea;
+  }
+
+  strong {
+    color: #1a3c5e;
   }
 }

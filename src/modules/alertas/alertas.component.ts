@@ -8,25 +8,27 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDialog, MatDialogModule, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { AlertsService } from './services/alerts.service';
 import { SessionService } from '../../core/services/session.service';
 import { Alert, AlertGroup } from './models/alert.model';
-import { Observable, map, of, switchMap } from 'rxjs';
+import { Observable, map, of, switchMap, tap } from 'rxjs';
 import { toObservable } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-alertas',
   standalone: true,
   imports: [
-    CommonModule, 
-    MatCardModule, 
-    MatTableModule, 
-    MatIconModule, 
+    CommonModule,
+    MatCardModule,
+    MatTableModule,
+    MatIconModule,
     MatChipsModule,
     MatTooltipModule,
     MatMenuModule,
     MatDialogModule,
-    MatButtonModule
+    MatButtonModule,
+    MatPaginatorModule,
   ],
   templateUrl: './alertas.component.html',
   styleUrls: ['./alertas.component.scss'],
@@ -36,7 +38,10 @@ export class AlertasComponent {
   private readonly alertsService = inject(AlertsService);
   private readonly session = inject(SessionService);
   private readonly dialog = inject(MatDialog);
-  
+
+  pageIndex = 0;
+  readonly pageSize = 30;
+
   // Combina o perfil do usuário e o escopo selecionado (para ADMIN) para filtrar os alertas
   alertsList$: Observable<AlertGroup[]> = toObservable(computed(() => {
     const user = this.session.user();
@@ -67,7 +72,8 @@ export class AlertasComponent {
       
       return of([]);
     }),
-    map(alerts => this.groupAlerts(alerts || []))
+    map(alerts => this.groupAlerts(alerts || [])),
+    tap(() => this.pageIndex = 0)
   );
   
   private groupAlerts(alerts: Alert[]): AlertGroup[] {
@@ -144,6 +150,10 @@ export class AlertasComponent {
     // Calcula diferença em relação à data atual (hoje)
     const diffTime = base.getTime() - hoje.getTime();
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  }
+
+  onPageChange(e: PageEvent): void {
+    this.pageIndex = e.pageIndex;
   }
 
   openAlertSummary(group: AlertGroup) {

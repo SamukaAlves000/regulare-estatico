@@ -6,6 +6,8 @@ import { Risk } from '../models/risk.model';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
 import { AuditUser } from '../models/company.model';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 
 function makeId(prefix = '') { return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2,8)}`; }
 
@@ -15,6 +17,7 @@ export class CompanyRisksService {
   private readonly genericRepo = inject(RisksRepository);
   private readonly session = inject(SessionService);
   private readonly usersRepo = inject(UsersRepository);
+  private readonly auditLog = inject(AuditLogService);
 
   private getUid(): string {
     const u = (this.session as any).user?.();
@@ -40,7 +43,25 @@ export class CompanyRisksService {
       status: 'ativo'
     } as CompanyRisk;
 
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.COMPANY_RISK_LINK_ERROR, createError, { companyId, genericRiskId: genericRisk.id });
+      throw createError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_RISK_LINKED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: (user as any)?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { companyId, companyRiskId: id, genericRiskId: genericRisk.id, name: genericRisk.name }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 
@@ -53,11 +74,47 @@ export class CompanyRisksService {
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
     const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
-    await this.repo.updateRisk(id, { ...patch, updatedAt: now, updatedBy });
+    try {
+      await this.repo.updateRisk(id, { ...patch, updatedAt: now, updatedBy });
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.COMPANY_RISK_UPDATE_ERROR, updateError, { companyRiskId: id, patch });
+      throw updateError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_RISK_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: (user as any)?.profile || 'UNKNOWN',
+        userEmail: updatedBy.email,
+        userId: updatedBy.uid,
+        details: { companyRiskId: id, patch }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async deleteRisk(id: string): Promise<void> {
-    await this.repo.deleteRisk(id);
+    try {
+      await this.repo.deleteRisk(id);
+    } catch (deleteError) {
+      await this.auditLog.logError(AuditAction.COMPANY_RISK_DELETE_ERROR, deleteError, { companyRiskId: id });
+      throw deleteError;
+    }
+
+    try {
+      const uid = this.getUid();
+      const user = await this.usersRepo.get(uid);
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_RISK_DELETED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: (user as any)?.profile || 'UNKNOWN',
+        userEmail: user?.email ?? '',
+        userId: uid,
+        details: { companyRiskId: id }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async searchCompanyRisks(companyId: string, term: string): Promise<CompanyRisk[]> {
@@ -115,7 +172,25 @@ export class CompanyRisksService {
     // remove undefined
     for (const k of Object.keys(doc)) if ((doc as any)[k] === undefined) delete (doc as any)[k];
 
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.COMPANY_RISK_CREATE_ERROR, createError, { companyId, name: doc.name });
+      throw createError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_RISK_CREATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: (user as any)?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { companyId, companyRiskId: id, name: doc.name }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 

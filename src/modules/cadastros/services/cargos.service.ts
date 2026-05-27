@@ -6,6 +6,10 @@ import { AuditUser } from '../models/company.model';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
 
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
+import { firstValueFrom } from 'rxjs';
+
 function makeId(prefix = '') { return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2,8)}`; }
 
 @Injectable({ providedIn: 'root' })
@@ -14,7 +18,8 @@ export class CargosService {
     private readonly repo: CargosRepository,
     private readonly session: SessionService,
     private readonly usersRepo: UsersRepository,
-    private readonly employeesRepo: EmployeesRepository
+    private readonly employeesRepo: EmployeesRepository,
+    private readonly auditLog: AuditLogService
   ) {}
 
   private getUid(): string {
@@ -85,7 +90,7 @@ export class CargosService {
 
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     const now = new Date().toISOString();
     const id = `cargo_${makeId()}`;
     const doc: Cargo = {
@@ -102,7 +107,25 @@ export class CargosService {
       updatedAt: now,
       createdBy: audit,
     } as Cargo;
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.CARGO_CREATE_ERROR, createError, { name: doc.name, cbo: doc.cbo });
+      throw createError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.CARGO_CREATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: audit.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { cargoId: id, name: doc.name, cbo: doc.cbo }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 
@@ -110,12 +133,48 @@ export class CargosService {
     const now = new Date().toISOString();
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
-    await this.repo.updateCargo(id, { ...patch, updatedAt: now, updatedBy } as Partial<Cargo>);
+    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
+    try {
+      await this.repo.updateCargo(id, { ...patch, updatedAt: now, updatedBy } as Partial<Cargo>);
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.CARGO_UPDATE_ERROR, updateError, { cargoId: id, patch });
+      throw updateError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.CARGO_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: updatedBy.profile || 'UNKNOWN',
+        userEmail: updatedBy.email,
+        userId: updatedBy.uid,
+        details: { cargoId: id, patch }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async setActive(id: string, ativo: boolean) {
-    await this.repo.updateCargo(id, { status: ativo ? 'ativo' : 'inativo' });
+    try {
+      await this.repo.updateCargo(id, { status: ativo ? 'ativo' : 'inativo' });
+    } catch (statusError) {
+      await this.auditLog.logError(AuditAction.CARGO_STATUS_ERROR, statusError, { cargoId: id, status: ativo ? 'ativo' : 'inativo' });
+      throw statusError;
+    }
+
+    try {
+      const uid = this.getUid();
+      const user = await this.usersRepo.get(uid);
+      await this.auditLog.log({
+        action: AuditAction.CARGO_STATUS_CHANGED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: (user as any)?.profile || 'UNKNOWN',
+        userEmail: user?.email ?? '',
+        userId: uid,
+        details: { cargoId: id, status: ativo ? 'ativo' : 'inativo' }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async listCargosPaged(term: string, pageSize: number, startAfterDoc?: any) {
@@ -123,6 +182,24 @@ export class CargosService {
   }
 
   async getCargo(id: string) {
-    return this.repo.getById(id);
+    const cargo = await this.repo.getById(id);
+
+    if (cargo) {
+      try {
+        const uid = this.getUid();
+        const user = await this.usersRepo.get(uid);
+        await this.auditLog.log({
+          action: 'cargo_viewed',
+          appVersion: '',
+          osVersion: '',
+          user_profile: (user as any)?.profile || 'UNKNOWN',
+          userEmail: user?.email ?? '',
+          userId: uid,
+          details: { cargoId: id, name: cargo.name }
+        });
+      } catch (e) { console.error('Audit error:', e); }
+    }
+
+    return cargo;
   }
 }

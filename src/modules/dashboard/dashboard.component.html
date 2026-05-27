@@ -1,204 +1,240 @@
 <div class="dashboard-wrapper">
-  <h1 class="page-title">Visão Geral</h1>
-
-  <!-- LINHA 1: 4 Cards de Indicadores (Lado a Lado) -->
-  <div class="row-overview">
-    <mat-card
-      class="stat-card compliance-card"
-      (click)="navigateTo('Licenças')"
-      style="cursor: pointer"
-    >
-      <mat-card-content>
-        <div class="stat-content">
-          <span class="label">Índice de Conformidade</span>
-          <span class="value">{{ complianceIndex() }}%</span>
-          <span class="sub-label">Conformidade Geral</span>
-        </div>
-      </mat-card-content>
-    </mat-card>
-
-    <mat-card
-      class="stat-card"
-      [ngClass]="riskInfo().class"
-      (click)="navigateTo('Licenças')"
-      style="cursor: pointer"
-    >
-      <mat-card-content>
-        <div class="stat-content">
-          <span class="label">Risco Regulatório</span>
-          <span class="value">{{ riskInfo().label }}</span>
-        </div>
-      </mat-card-content>
-    </mat-card>
-
-    <mat-card
-      class="stat-card total-card"
-      (click)="navigateTo('Licenças')"
-      style="cursor: pointer"
-    >
-      <mat-card-content>
-        <div class="stat-content">
-          <span class="label">Obrigações Totais</span>
-          <span class="value">{{ totalItems() }}</span>
-        </div>
-      </mat-card-content>
-    </mat-card>
-
-    <mat-card
-      class="stat-card"
-      [ngClass]="pendenciesInfo().class"
-      (click)="navigateTo('Licenças', 'vencido')"
-      style="cursor: pointer"
-    >
-      <mat-card-content>
-        <div class="stat-content">
-          <span class="label">Pendências Regulatórias</span>
-          <span class="value">{{ pendenciesInfo().label }}</span>
-        </div>
-      </mat-card-content>
-    </mat-card>
-  </div>
-
-  <!-- LINHA 2: 3 Cards Principais (Gráfico, Alertas, Vencimentos) -->
-  <div class="row-main">
-    <mat-card class="chart-card">
-      <mat-card-header>
-        <mat-card-title>📊 Situação das Obrigações</mat-card-title>
-      </mat-card-header>
-      <mat-card-content>
-        <div class="chart-container">
-          <canvas
-            baseChart
-            [data]="pieChartData()"
-            [options]="pieChartOptions"
-            [type]="pieChartType"
-          >
-          </canvas>
-        </div>
-      </mat-card-content>
-    </mat-card>
-
-    <mat-card class="alert-card">
-      <mat-card-header>
-        <mat-card-title>🚨 Alertas Prioritários</mat-card-title>
-      </mat-card-header>
-      <mat-card-content>
-        <div *ngIf="expired() === 0" class="empty-state-alerts">
-          Nenhum item vencido no momento.
-        </div>
-        <div
-          class="alert-item"
-          *ngFor="let item of rawData() | filterByStatus: 'vencido'"
-          (click)="openItem(item)"
-          style="cursor: pointer"
+    <div class="dashboard-header">
+        <h1 class="page-title">Visão Geral</h1>
+        <button
+                mat-raised-button
+                color="primary"
+                (click)="openReportDialog()"
+                [disabled]="loading()"
+                class="report-btn"
         >
-          <mat-icon color="warn">error</mat-icon>
-          <div class="alert-info">
-            <strong>{{ item.nome }}</strong>
-            <span
-              >Vencido há {{ getAbsoluteDays(item.dataVencimento) }} dias</span
-            >
-          </div>
-        </div>
-      </mat-card-content>
-    </mat-card>
+            <mat-icon>picture_as_pdf</mat-icon>
+            Gerar Relatório GRC
+        </button>
+    </div>
 
-    <mat-card class="upcoming-card">
-      <mat-card-header class="card-header-actions">
-        <mat-card-title>📅 Próximos Vencimentos (30 dias)</mat-card-title>
-      </mat-card-header>
-      <mat-card-content>
-        <table class="reg-table">
-          <tbody>
-            <tr
-              *ngFor="let item of upcoming30Days()"
-              (click)="openItem(item)"
-              style="cursor: pointer"
-            >
-              <td class="upcoming-item-cell">
-                <div class="name">{{ item.nome }}</div>
-                <div class="date">
-                  vence em {{ getDaysDiff(item.dataVencimento) }} dias
+    <!-- LINHA 1: 4 Cards de Indicadores (Lado a Lado) -->
+    <div class="row-overview">
+        <mat-card
+                class="stat-card compliance-card"
+                (click)="navigateTo('Licenças')"
+                style="cursor: pointer"
+        >
+            <mat-card-content>
+                <div class="stat-content">
+                    <span class="label">Índice de Conformidade</span>
+                    <span class="value">{{ complianceIndex() }}%</span>
+                    <span class="sub-label">Conformidade Geral</span>
                 </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="actions-footer">
-          <button mat-button color="primary" (click)="navigateTo('licencas')">
-            Ver todos
-          </button>
-        </div>
-      </mat-card-content>
-    </mat-card>
-  </div>
+            </mat-card-content>
+        </mat-card>
 
-  <!-- LINHA 3: Resumo por Tipo de Obrigação (100% largura) -->
-  <div class="row-summary">
-    <mat-card class="summary-type-card">
-      <mat-card-header>
-        <mat-card-title>📋 Resumo por Tipo de Obrigação</mat-card-title>
-      </mat-card-header>
-      <mat-card-content>
-        <table class="reg-table">
-          <thead>
-            <tr>
-              <th>Categoria</th>
-              <th>Total</th>
-              <th>Em Dia</th>
-              <th>A Vencer</th>
-              <th>Irregulares</th>
-              <th style="width: 280px">Índice de Conformidade</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let summary of summaryByType()">
-              <td>
-                <strong
-                  (click)="navigateTo(summary.tipo)"
-                  style="cursor: pointer"
-                  >{{ summary.tipo }}</strong
+        <mat-card
+                class="stat-card"
+                [ngClass]="riskInfo().class"
+                (click)="navigateTo('Licenças')"
+                style="cursor: pointer"
+        >
+            <mat-card-content>
+                <div class="stat-content">
+                    <span class="label">Risco Regulatório</span>
+                    <span class="value">{{ riskInfo().label }}</span>
+                </div>
+            </mat-card-content>
+        </mat-card>
+
+        <mat-card
+                class="stat-card total-card"
+                (click)="navigateTo('Licenças')"
+                style="cursor: pointer"
+        >
+            <mat-card-content>
+                <div class="stat-content">
+                    <span class="label">Obrigações Totais</span>
+                    <span class="value">{{ totalGeral() }}</span>
+                </div>
+            </mat-card-content>
+        </mat-card>
+
+        <mat-card
+                class="stat-card"
+                [ngClass]="pendenciesInfo().class"
+                (click)="navigateTo('Licenças', 'vencido')"
+                style="cursor: pointer"
+        >
+            <mat-card-content>
+                <div class="stat-content">
+                    <span class="label">Pendências Regulatórias</span>
+                    <span class="value">{{ pendenciesInfo().label }}</span>
+                </div>
+            </mat-card-content>
+        </mat-card>
+    </div>
+
+    <!-- LINHA 2: 3 Cards Principais (Gráfico, Alertas, Vencimentos) -->
+    <div class="row-main">
+        <mat-card class="chart-card">
+            <mat-card-header>
+                <mat-card-title>📊 Situação das Obrigações</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+                <div class="chart-container">
+                    <canvas
+                            baseChart
+                            [data]="pieChartData()"
+                            [options]="pieChartOptions"
+                            [type]="pieChartType"
+                    >
+                    </canvas>
+                </div>
+            </mat-card-content>
+        </mat-card>
+
+        <mat-card class="alert-card">
+            <mat-card-header>
+                <mat-card-title>🚨 Alertas Prioritários</mat-card-title>
+                <mat-card-subtitle *ngIf="totalVencidos() > 0" class="alert-badge">
+                    {{ totalVencidos() }} vencido(s)
+                </mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+                <div *ngIf="totalVencidos() === 0" class="empty-state-alerts">
+                    <mat-icon>check_circle</mat-icon>
+                    <span>Nenhum item vencido no momento.</span>
+                </div>
+                <div
+                        class="alert-item"
+                        *ngFor="let item of getItensVencidos() | slice:0:3"
+                        (click)="openItem(item)"
+                        style="cursor: pointer"
                 >
-              </td>
-              <td (click)="navigateTo(summary.tipo)" style="cursor: pointer">
-                {{ summary.total }}
-              </td>
-              <td
-                (click)="navigateTo(summary.tipo, 'em_dia')"
-                style="cursor: pointer"
-              >
-                <span class="indicator-dot success"></span> {{ summary.inDay }}
-              </td>
-              <td
-                (click)="navigateTo(summary.tipo, 'a_vencer')"
-                style="cursor: pointer"
-              >
-                <span class="indicator-dot warning"></span>
-                {{ summary.upcoming }}
-              </td>
-              <td
-                (click)="navigateTo(summary.tipo, 'vencido')"
-                style="cursor: pointer"
-              >
-                <span class="indicator-dot danger"></span>
-                {{ summary.irregular }}
-              </td>
-              <td>
-                <div class="progress-cell">
-                  <mat-progress-bar
-                    mode="determinate"
-                    [value]="summary.percentage"
-                    [color]="summary.percentage >= 80 ? 'primary' : 'warn'"
-                  ></mat-progress-bar>
-                  <span class="percentage-label"
-                    >{{ summary.percentage }}%</span
-                  >
+                    <mat-icon color="warn">error</mat-icon>
+                    <div class="alert-info">
+                        <strong>{{ item.document }}</strong>
+                        <span>Vencido há {{ getAbsoluteDaysFromDate(item.date) }} dias</span>
+                    </div>
                 </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </mat-card-content>
-    </mat-card>
-  </div>
+                <div *ngIf="totalVencidos() > 3" class="alert-more">
+                    <button mat-button color="warn" >
+                        + {{ totalVencidos() - 3 }} outro(s) vencido(s).
+                    </button>
+                </div>
+            </mat-card-content>
+        </mat-card>
+
+        <mat-card class="upcoming-card">
+            <mat-card-header class="card-header-actions">
+                <mat-card-title>📅 Próximos Vencimentos (30 dias)</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+                <table class="reg-table">
+                    <tbody>
+                    <tr
+                            *ngFor="let item of upcoming30Days()"
+                            (click)="openItem(item)"
+                            style="cursor: pointer"
+                    >
+                        <td class="upcoming-item-cell">
+                            <div class="name">{{ item.document }}</div>
+                            <div class="date">
+                                vence em {{ item.daysRemaining }} dias
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+                <div class="actions-footer">
+                    <button mat-button color="primary" (click)="navigateTo('licencas')">
+                        Ver todos
+                    </button>
+                </div>
+            </mat-card-content>
+        </mat-card>
+    </div>
+
+    <!-- LINHA 3: Resumo por Tipo de Obrigação (100% largura) -->
+    <div class="row-summary">
+        <mat-card class="summary-type-card">
+            <mat-card-header>
+                <mat-card-title>📋 Resumo por Tipo de Obrigação</mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+                <table class="reg-table">
+                    <thead>
+                    <tr>
+                        <th>Categoria</th>
+                        <th>Total</th>
+                        <th>Em Dia</th>
+                        <th>A Vencer</th>
+                        <th>Irregulares</th>
+                        <th style="width: 280px">Índice de Conformidade</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr *ngFor="let summary of summaryByType()">
+                        <td>
+                            <strong
+                                    (click)="navigateTo(summary.tipo)"
+                                    style="cursor: pointer"
+                            >{{ summary.tipo }}</strong>
+                        </td>
+                        <td (click)="navigateTo(summary.tipo)" style="cursor: pointer">
+                            {{ summary.total }}
+                        </td>
+                        <td (click)="navigateTo(summary.tipo, 'em_dia')" style="cursor: pointer">
+                            <span class="indicator-dot success"></span> {{ summary.inDay }}
+                        </td>
+                        <td (click)="navigateTo(summary.tipo, 'a_vencer')" style="cursor: pointer">
+                            <span class="indicator-dot warning"></span>
+                            {{ summary.upcoming }}
+                        </td>
+                        <td (click)="navigateTo(summary.tipo, 'vencido')" style="cursor: pointer">
+                            <span class="indicator-dot danger"></span>
+                            {{ summary.irregular }}
+                        </td>
+                        <td>
+                            <div class="progress-cell">
+                                <mat-progress-bar
+                                        mode="determinate"
+                                        [value]="summary.percentage"
+                                        [color]="summary.percentage >= 80 ? 'primary' : 'warn'"
+                                ></mat-progress-bar>
+                                <span class="percentage-label">{{ summary.percentage }}%</span>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- LINHA TOTAL GERAL -->
+                    <tr class="total-row">
+                        <td>
+                            <strong>TOTAL GERAL</strong>
+                        </td>
+                        <td>
+                            <strong>{{ totalGeral() }}</strong>
+                        </td>
+                        <td>
+                            <strong>{{ totalEmDiaGeral() }}</strong>
+                        </td>
+                        <td>
+                            <strong>{{ totalAVencerGeral() }}</strong>
+                        </td>
+                        <td>
+                            <strong>{{ totalIrregularesGeral() }}</strong>
+                        </td>
+                        <td>
+                            <div class="progress-cell">
+                                <mat-progress-bar
+                                        mode="determinate"
+                                        [value]="complianceIndex()"
+                                        [color]="complianceIndex() >= 80 ? 'primary' : 'warn'"
+                                ></mat-progress-bar>
+                                <span class="percentage-label">{{ complianceIndex() }}%</span>
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </mat-card-content>
+        </mat-card>
+    </div>
 </div>

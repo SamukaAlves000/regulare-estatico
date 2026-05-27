@@ -4,6 +4,8 @@ import { Unit } from '../models/unit.model';
 import { AuditUser, CompanyCnae } from '../models/company.model';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 
 // lightweight id generator to avoid extra dependency
 function makeId(prefix = '') {
@@ -38,7 +40,8 @@ export class UnitsService {
   constructor(
     private readonly repo: UnitsRepository,
     private readonly session: SessionService,
-    private readonly usersRepo: UsersRepository
+    private readonly usersRepo: UsersRepository,
+    private readonly auditLog: AuditLogService
   ) {}
 
   private isAdmin(): boolean {
@@ -59,7 +62,7 @@ export class UnitsService {
 
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     const now = new Date().toISOString();
     const id = `unit_${makeId()}`;
 
@@ -122,7 +125,25 @@ export class UnitsService {
     // Remove campos undefined (Firestore não aceita)
     Object.keys(doc as any).forEach((k) => ((doc as any)[k] === undefined ? delete (doc as any)[k] : null));
 
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.UNIT_CREATE_ERROR, createError, { name: doc.name, companyId: doc.companyId });
+      throw createError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.UNIT_CREATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { unitId: id, name: doc.name, companyId: doc.companyId }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 
@@ -138,7 +159,7 @@ export class UnitsService {
     const now = new Date().toISOString();
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
 
     // Normaliza address/city/state para manter compatibilidade
     const city = patch.address?.city ?? (patch as any).city;
@@ -172,11 +193,47 @@ export class UnitsService {
     // Remove campos undefined (Firestore não aceita)
     Object.keys(normalized as any).forEach((k) => ((normalized as any)[k] === undefined ? delete (normalized as any)[k] : null));
 
-    await this.repo.updateUnit(id, normalized as Partial<Unit>);
+    try {
+      await this.repo.updateUnit(id, normalized as Partial<Unit>);
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.UNIT_UPDATE_ERROR, updateError, { unitId: id, patch: normalized });
+      throw updateError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.UNIT_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: updatedBy.email,
+        userId: updatedBy.uid,
+        details: { unitId: id, patch: normalized }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async setActive(id: string, ativo: boolean): Promise<void> {
-    await this.repo.updateUnit(id, { status: ativo ? 'active' : 'inactive' } as any);
+    try {
+      await this.repo.updateUnit(id, { status: ativo ? 'active' : 'inactive' } as any);
+    } catch (statusError) {
+      await this.auditLog.logError(AuditAction.UNIT_STATUS_ERROR, statusError, { unitId: id, status: ativo ? 'active' : 'inactive' });
+      throw statusError;
+    }
+
+    try {
+      const uid = this.getUid();
+      const user = await this.usersRepo.get(uid);
+      await this.auditLog.log({
+        action: AuditAction.UNIT_STATUS_CHANGED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: (user as any)?.profile || 'UNKNOWN',
+        userEmail: user?.email ?? '',
+        userId: uid,
+        details: { unitId: id, status: ativo ? 'active' : 'inactive' }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async listByEmpresa(empresaId: string): Promise<Unit[]> {
@@ -185,7 +242,25 @@ export class UnitsService {
   }
 
   async getUnit(id: string) {
-    return this.repo.getById(id);
+    const unit = await this.repo.getById(id);
+
+    if (unit) {
+      try {
+        const uid = this.getUid();
+        const user = await this.usersRepo.get(uid);
+        await this.auditLog.log({
+          action: 'unit_viewed',
+          appVersion: '',
+          osVersion: '',
+          user_profile: (user as any)?.profile || 'UNKNOWN',
+          userEmail: user?.email ?? '',
+          userId: uid,
+          details: { unitId: id, name: unit.name }
+        });
+      } catch (e) { console.error('Audit error:', e); }
+    }
+
+    return unit;
   }
 
   async listUnitsPaged(term: string, pageSize: number, startAfterDoc?: any) {

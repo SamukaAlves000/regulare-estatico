@@ -7,6 +7,8 @@ import { EquipmentsService } from './equipments.service';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
 import { AuditUser } from '../models/company.model';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 
 function makeId(prefix = '') { return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2,8)}`; }
 
@@ -17,6 +19,7 @@ export class CompanyEquipmentsService {
   private readonly genericService = inject(EquipmentsService);
   private readonly session = inject(SessionService);
   private readonly usersRepo = inject(UsersRepository);
+  private readonly auditLog = inject(AuditLogService);
 
   private getUid(): string {
     const u = (this.session as any).user?.();
@@ -26,7 +29,7 @@ export class CompanyEquipmentsService {
   async createFromGeneric(companyId: string, genericEquipment: Equipment): Promise<string> {
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    const audit: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     const now = new Date().toISOString();
     const id = `cequip_${makeId()}`;
 
@@ -42,7 +45,25 @@ export class CompanyEquipmentsService {
       status: 'ativo'
     } as CompanyEquipment;
 
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.COMPANY_EQUIPMENT_LINK_ERROR, createError, { companyId, genericEquipmentId: genericEquipment.id });
+      throw createError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_EQUIPMENT_LINKED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { companyId, companyEquipmentId: id, genericEquipmentId: genericEquipment.id, name: genericEquipment.name }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 
@@ -67,8 +88,25 @@ export class CompanyEquipmentsService {
     const now = new Date().toISOString();
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '' };
-    await this.repo.updateEquipment(id, { ...patch, updatedAt: now, updatedBy });
+    const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
+    try {
+      await this.repo.updateEquipment(id, { ...patch, updatedAt: now, updatedBy });
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.COMPANY_EQUIPMENT_UPDATE_ERROR, updateError, { companyEquipmentId: id, patch });
+      throw updateError;
+    }
+
+    try {
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_EQUIPMENT_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: updatedBy.email,
+        userId: updatedBy.uid,
+        details: { companyEquipmentId: id, patch }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async deleteEquipment(id: string): Promise<void> {
@@ -82,7 +120,26 @@ export class CompanyEquipmentsService {
       // Checking if EquipmentsService has deleteEquipment
       return this.genericRepo.delete(id);
     }
-    await this.repo.deleteEquipment(id);
+    try {
+      await this.repo.deleteEquipment(id);
+    } catch (deleteError) {
+      await this.auditLog.logError(AuditAction.COMPANY_EQUIPMENT_DELETE_ERROR, deleteError, { companyEquipmentId: id });
+      throw deleteError;
+    }
+
+    try {
+      const uid = this.getUid();
+      const user = await this.usersRepo.get(uid);
+      await this.auditLog.log({
+        action: AuditAction.COMPANY_EQUIPMENT_DELETED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: user?.email ?? '',
+        userId: uid,
+        details: { companyEquipmentId: id }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async setActive(id: string, ativo: boolean): Promise<void> {

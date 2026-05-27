@@ -1,0 +1,12 @@
+[build]
+  publish = "dist/regulare-estatico"
+  functions = "netlify/functions"
+
+[dev]
+  framework = "angular"
+  command = "npm start"
+  targetPort = 4200
+  port = 8888
+
+[functions]
+  node_bundler = "esbuild"

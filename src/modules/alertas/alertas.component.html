@@ -5,7 +5,7 @@
   </div>
 
   <div class="table-container" *ngIf="alertsList$ | async as alerts; else loading">
-    <table mat-table [dataSource]="alerts" class="full-width-table">
+    <table mat-table [dataSource]="alerts.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize)" class="full-width-table">
       
       <ng-container matColumnDef="origemTipo">
         <th mat-header-cell *matHeaderCellDef>Tipo</th>
@@ -63,6 +63,16 @@
       <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
       <tr mat-row *matRowDef="let row; columns: displayedColumns;" (click)="openAlertSummary(row)" class="clickable-row"></tr>
     </table>
+
+    <mat-paginator
+      *ngIf="alerts.length > pageSize"
+      [length]="alerts.length"
+      [pageSize]="pageSize"
+      [pageIndex]="pageIndex"
+      (page)="onPageChange($event)"
+      hidePageSize
+      showFirstLastButtons>
+    </mat-paginator>
 
     <div *ngIf="alerts.length === 0" class="empty-state">
       <mat-icon>notifications_off</mat-icon>

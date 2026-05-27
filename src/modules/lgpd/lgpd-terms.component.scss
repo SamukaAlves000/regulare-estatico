@@ -1,0 +1,127 @@
+:host { display: block; }
+
+.lgpd-full {
+  width: 100%;
+  padding: 8px;
+}
+
+/* Toolbar */
+.toolbar-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.toolbar-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.page-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1a3c5e;
+
+  mat-icon { font-size: 20px; width: 20px; height: 20px; }
+}
+
+.page-subtitle {
+  font-size: .8rem;
+  color: #7f8c8d;
+  padding-left: 26px;
+}
+
+/* Table */
+.td-title {
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.td-date {
+  font-size: .82rem;
+  color: #7f8c8d;
+  white-space: nowrap;
+}
+
+.td-actions {
+  white-space: nowrap;
+  padding-right: 4px !important;
+}
+
+/* Badges */
+.version-badge {
+  background: #eaf0f6;
+  color: #1a3c5e;
+  border-radius: 10px;
+  padding: 3px 8px;
+  font-size: .72rem;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-size: .73rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-draft     { background: #f5f5f5; color: #555; }
+.status-published { background: #e8f5e9; color: #27ae60; }
+.status-archived  { background: #fdf3f2; color: #c0392b; }
+
+.active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #27ae60;
+  font-size: .78rem;
+  font-weight: 600;
+
+  mat-icon { font-size: 15px; width: 15px; height: 15px; }
+}
+
+.inactive-label { color: #ccc; }
+
+.accept-count {
+  font-size: .85rem;
+  font-weight: 600;
+  color: #1a3c5e;
+}
+
+/* Row highlight for active term */
+.row-active { background: #f0faf4; }
+
+/* Icon button accent colors */
+.btn-publish ::ng-deep mat-icon  { color: #1a3c5e; }
+.btn-activate ::ng-deep mat-icon { color: #27ae60; }
+.btn-version ::ng-deep mat-icon  { color: #7f8c8d; }
+
+/* Empty state */
+.lgpd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 0;
+  color: #aaa;
+  text-align: center;
+
+  p { margin: 0; font-size: .95rem; }
+}
+
+.empty-icon { font-size: 48px; width: 48px; height: 48px; opacity: .4; }

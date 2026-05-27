@@ -4,6 +4,8 @@ import { Equipment } from '../models/equipment.model';
 import { SessionService } from '../../../core/services/session.service';
 import { UsersRepository } from '../../../core/services/users.repository';
 import { AuditUser } from '../models/company.model';
+import { AuditLogService } from '../../../core/services/audit-log.service';
+import { AuditAction } from '../../../core/models/audit-log.model';
 
 function makeId(prefix = '') {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -18,7 +20,8 @@ export class EquipmentsService {
   constructor(
     private readonly repo: EquipmentsRepository,
     private readonly session: SessionService,
-    private readonly usersRepo: UsersRepository
+    private readonly usersRepo: UsersRepository,
+    private readonly auditLog: AuditLogService
   ) {}
 
   private getUid(): string {
@@ -29,7 +32,7 @@ export class EquipmentsService {
   private async getAuditUser(): Promise<AuditUser> {
     const uid = this.getUid();
     const user = await this.usersRepo.get(uid);
-    return { uid, name: user?.name ?? '', email: user?.email ?? '' };
+    return { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
   }
 
   async createEquipment(input: Partial<Equipment>): Promise<string> {
@@ -72,7 +75,26 @@ export class EquipmentsService {
       if ((doc as any)[k] === undefined) delete (doc as any)[k];
     }
 
-    await this.repo.create(doc);
+    try {
+      await this.repo.create(doc);
+    } catch (createError) {
+      await this.auditLog.logError(AuditAction.EQUIPMENT_CREATE_ERROR, createError, { name: doc.name, type: doc.type });
+      throw createError;
+    }
+
+    try {
+      const user = await this.usersRepo.get(audit.uid);
+      await this.auditLog.log({
+        action: AuditAction.EQUIPMENT_CREATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { equipmentId: id, name: doc.name, type: doc.type }
+      });
+    } catch (e) { console.error('Audit error:', e); }
+
     return id;
   }
 
@@ -111,7 +133,25 @@ export class EquipmentsService {
       if (safePatch[k] === undefined) delete safePatch[k];
     }
 
-    await this.repo.updateEquipment(id, safePatch);
+    try {
+      await this.repo.updateEquipment(id, safePatch);
+    } catch (updateError) {
+      await this.auditLog.logError(AuditAction.EQUIPMENT_UPDATE_ERROR, updateError, { equipmentId: id, patch: safePatch });
+      throw updateError;
+    }
+
+    try {
+      const user = await this.usersRepo.get(audit.uid);
+      await this.auditLog.log({
+        action: AuditAction.EQUIPMENT_UPDATED,
+        appVersion: '',
+        osVersion: '',
+        user_profile: user?.profile || 'UNKNOWN',
+        userEmail: audit.email,
+        userId: audit.uid,
+        details: { equipmentId: id, patch: safePatch }
+      });
+    } catch (e) { console.error('Audit error:', e); }
   }
 
   async setActive(id: string, ativo: boolean): Promise<void> {

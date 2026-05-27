@@ -537,6 +537,8 @@ export class EpiDeliveryDialogComponent implements OnInit, OnDestroy {
 
         const val = this.form.getRawValue();
         const company = this.companies.find(c => c.id === val.companyId);
+        const unit = this.units.find(u => u.id === val.unitId);
+        const sector = this.sectors.find(s => s.id === val.sectorId);
 
         // Capturar dados completos do funcionário se não estiverem no objeto selecionado (caso de edição)
         let employeeData = this.selectedEmployee;
@@ -555,6 +557,8 @@ export class EpiDeliveryDialogComponent implements OnInit, OnDestroy {
             cargoCbo: employeeData?.cargoCbo,
             companyName: company?.razaoSocial || company?.name || this.data?.companyName,
             companyCnpj: company?.document || company?.cnpj || this.data?.companyCnpj,
+            unitName: unit?.name || this.data?.unitName,
+            sectorName: sector?.name || this.data?.sectorName,
             riskIds: this.selectedRisksIds,
             items: this.deliveryItems,
             receiptUrl: this.currentFileUrl,
@@ -619,9 +623,10 @@ export class EpiDeliveryDialogComponent implements OnInit, OnDestroy {
         let signatureBase64 = null;
         if (this.data?.signed && this.data?.signatureUrl) {
             try {
-                this.snack.open('Processando assinatura para o PDF...', 'OK', { duration: 2000 });
-                signatureBase64 = await this.getBase64ImageFromURL(this.data.signatureUrl);
-            } catch (error) {
+        this.snack.open('Processando assinatura para o PDF...', 'OK', { duration: 2000 });
+        signatureBase64 = await this.getBase64ImageFromURL(this.data.signatureUrl);
+        await this.epiDeliveriesService.logDownloadTerm(this.data.id);
+      } catch (error) {
                 console.error('Erro ao converter assinatura para Base64:', error);
                 this.snack.open('Aviso: Erro de segurança (CORS) ao carregar assinatura do Firebase.', 'OK', { duration: 6000 });
                 console.warn('DICA: O bucket do Firebase Storage precisa estar configurado para permitir CORS da origem atual.');
