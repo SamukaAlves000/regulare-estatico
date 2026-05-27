@@ -3,13 +3,17 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatDialogModule, MatDialogRef, MAT_DIALOG_DATA } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatIconModule } from '@angular/material/icon';
+import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatDividerModule } from '@angular/material/divider';
 import { Firestore, collection, query, where, getDocs } from '@angular/fire/firestore';
 import { Company } from '../cadastros/models/company.model';
 import { Unit } from '../cadastros/models/unit.model';
+import { GrcReportOptions } from './services/grc-report.service';
 
 export interface GrcReportDialogData {
     companyId: string | undefined;
@@ -24,10 +28,13 @@ export interface GrcReportDialogData {
         FormsModule,
         MatDialogModule,
         MatFormFieldModule,
+        MatInputModule,
         MatSelectModule,
         MatButtonModule,
         MatProgressSpinnerModule,
         MatIconModule,
+        MatCheckboxModule,
+        MatDividerModule,
     ],
     template: `
     <h2 mat-dialog-title>
@@ -65,6 +72,39 @@ export interface GrcReportDialogData {
           <span>Carregando...</span>
         </div>
 
+        <mat-divider></mat-divider>
+
+        <div class="section-group">
+          <p class="section-label">Período de vencimento / prazo (filtro)</p>
+          <div class="date-range-row">
+            <mat-form-field appearance="outline">
+              <mat-label>Data início</mat-label>
+              <input matInput type="date" [(ngModel)]="dateStart">
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <mat-label>Data fim</mat-label>
+              <input matInput type="date" [(ngModel)]="dateEnd">
+            </mat-form-field>
+          </div>
+          <p class="hint-text">Filtra licenças/EPIs pelo vencimento e condicionantes pelo prazo. Deixe em branco para incluir todos.</p>
+        </div>
+
+        <div class="section-group">
+          <p class="section-label">Seções do relatório</p>
+          <div class="checkboxes-row">
+            <mat-checkbox [(ngModel)]="sections.licencas">Licenças</mat-checkbox>
+            <mat-checkbox [(ngModel)]="sections.condicionantes">Condicionantes</mat-checkbox>
+            <mat-checkbox [(ngModel)]="sections.epis" (change)="onEpisChange()">EPIs</mat-checkbox>
+          </div>
+        </div>
+
+        <div class="section-group">
+          <p class="section-label">Opções adicionais</p>
+          <mat-checkbox [(ngModel)]="epiHistory" [disabled]="!sections.epis">
+            Incluir histórico de ações nas entregas EPIs
+          </mat-checkbox>
+        </div>
+
       </div>
     </mat-dialog-content>
 
@@ -74,7 +114,7 @@ export interface GrcReportDialogData {
         mat-raised-button
         color="primary"
         (click)="onGenerate()"
-        [disabled]="!selectedCompanyId || loading"
+        [disabled]="!selectedCompanyId || loading || noSectionSelected"
       >
         <mat-icon>download</mat-icon>
         Gerar PDF
@@ -86,7 +126,7 @@ export interface GrcReportDialogData {
       display: flex;
       flex-direction: column;
       gap: 16px;
-      min-width: 360px;
+      min-width: 380px;
       padding-top: 8px;
     }
     mat-form-field { width: 100%; }
@@ -99,10 +139,15 @@ export interface GrcReportDialogData {
       color: #7f8c8d;
       font-size: 14px;
     }
+    .section-group { display: flex; flex-direction: column; gap: 8px; }
+    .section-label { margin: 0; font-size: 12px; font-weight: 600; color: #1a3c5e; text-transform: uppercase; letter-spacing: .5px; }
+    .checkboxes-row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .date-range-row { display: flex; gap: 12px; }
+    .date-range-row mat-form-field { flex: 1; }
+    .hint-text { margin: -4px 0 0; font-size: 11px; color: #7f8c8d; }
   `],
 })
 export class GrcReportDialogComponent implements OnInit {
-    // ✅ Injeção correta via inject() — compatível com standalone + Angular 15+
     readonly data: GrcReportDialogData = inject(MAT_DIALOG_DATA);
     private readonly firestore = inject(Firestore);
     private readonly dialogRef = inject(MatDialogRef<GrcReportDialogComponent>);
@@ -112,6 +157,15 @@ export class GrcReportDialogComponent implements OnInit {
     companies: Company[] = [];
     units: Unit[] = [];
     loading = false;
+
+    sections = { licencas: true, condicionantes: true, epis: true };
+    epiHistory = true;
+    dateStart = '';
+    dateEnd   = '';
+
+    get noSectionSelected(): boolean {
+        return !this.sections.licencas && !this.sections.condicionantes && !this.sections.epis;
+    }
 
     ngOnInit(): void {
         this.initializeData();
@@ -171,16 +225,29 @@ export class GrcReportDialogComponent implements OnInit {
         }
     }
 
+    onEpisChange(): void {
+        if (!this.sections.epis) {
+            this.epiHistory = false;
+        }
+    }
+
     onCancel(): void {
         this.dialogRef.close();
     }
 
     onGenerate(): void {
         if (!this.selectedCompanyId) return;
+        const options: GrcReportOptions = {
+            sections:   { ...this.sections },
+            epiHistory: this.epiHistory,
+            dateStart:  this.dateStart || undefined,
+            dateEnd:    this.dateEnd   || undefined,
+        };
         this.dialogRef.close({
             generate: true,
             companyId: this.selectedCompanyId,
             unitId: this.selectedUnitId ?? undefined,
+            options,
         });
     }
 }

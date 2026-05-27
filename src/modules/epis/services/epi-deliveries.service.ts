@@ -16,6 +16,26 @@ function makeId(prefix = '') {
   return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function buildDiff(
+  current: Partial<EpiDelivery> | null,
+  patch: Partial<EpiDelivery>
+): Record<string, { from: unknown; to: unknown }> {
+  const diff: Record<string, { from: unknown; to: unknown }> = {};
+  for (const key of Object.keys(patch) as (keyof EpiDelivery)[]) {
+    const next = patch[key];
+    if (next === undefined) continue;
+    const prev = current?.[key];
+    const hasChanged =
+      next !== null && typeof next === 'object'
+        ? JSON.stringify(prev) !== JSON.stringify(next)
+        : prev !== next;
+    if (hasChanged) {
+      diff[key] = { from: prev, to: next };
+    }
+  }
+  return diff;
+}
+
 @Injectable({ providedIn: 'root' })
 export class EpiDeliveriesService {
   private readonly repo = inject(EpiDeliveriesRepository);
@@ -71,6 +91,8 @@ export class EpiDeliveriesService {
       cargoCbo: input.cargoCbo!,
       companyName: input.companyName,
       companyCnpj: input.companyCnpj,
+      unitName: input.unitName,
+      sectorName: input.sectorName,
       deliveryDate: input.deliveryDate || now,
       items: input.items || [],
       riskIds: input.riskIds || [],
@@ -137,6 +159,9 @@ export class EpiDeliveriesService {
     const user = await this.usersRepo.get(uid);
     const updatedBy: AuditUser = { uid, name: user?.name ?? '', email: user?.email ?? '', profile: user?.profile };
     const now = new Date().toISOString();
+
+    const before = await this.getDelivery(id);
+    const diff = buildDiff(before, patch);
 
     const safePatch: any = { ...patch, updatedAt: now, updatedBy };
     Object.keys(safePatch).forEach(key => {
@@ -210,7 +235,7 @@ export class EpiDeliveriesService {
           user_profile: updatedBy.profile || 'UNKNOWN',
           userEmail: updatedBy.email,
           userId: updatedBy.uid,
-          details: { deliveryId: id, patch }
+          details: { deliveryId: id, changes: diff }
         });
       }
     } catch (error) {

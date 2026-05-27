@@ -537,6 +537,8 @@ export class EpiDeliveryDialogComponent implements OnInit, OnDestroy {
 
         const val = this.form.getRawValue();
         const company = this.companies.find(c => c.id === val.companyId);
+        const unit = this.units.find(u => u.id === val.unitId);
+        const sector = this.sectors.find(s => s.id === val.sectorId);
 
         // Capturar dados completos do funcionário se não estiverem no objeto selecionado (caso de edição)
         let employeeData = this.selectedEmployee;
@@ -555,6 +557,8 @@ export class EpiDeliveryDialogComponent implements OnInit, OnDestroy {
             cargoCbo: employeeData?.cargoCbo,
             companyName: company?.razaoSocial || company?.name || this.data?.companyName,
             companyCnpj: company?.document || company?.cnpj || this.data?.companyCnpj,
+            unitName: unit?.name || this.data?.unitName,
+            sectorName: sector?.name || this.data?.sectorName,
             riskIds: this.selectedRisksIds,
             items: this.deliveryItems,
             receiptUrl: this.currentFileUrl,

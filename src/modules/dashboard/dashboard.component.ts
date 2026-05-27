@@ -354,15 +354,15 @@ export class DashboardComponent implements OnInit {
 
         ref.afterClosed().subscribe(async result => {
             if (result?.generate) {
-                await this.generateReport(result.companyId, result.unitId);
+                await this.generateReport(result.companyId, result.unitId, result.options);
             }
         });
     }
 
-    private async generateReport(companyId: string, unitId?: string) {
+    private async generateReport(companyId: string, unitId?: string, options?: any) {
         try {
             this.loading.set(true);
-            await this.grcReportService.generateReport(companyId, unitId);
+            await this.grcReportService.generateReport(companyId, unitId, undefined, options);
         } catch (error) {
             console.error('Erro ao gerar relatório:', error);
             alert('Erro ao gerar relatório. Verifique o console.');

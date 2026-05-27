@@ -4,7 +4,7 @@ import { CommonModule } from '@angular/common';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
-import { GrcReportService } from './services/grc-report.service';
+import { GrcReportService, GrcReportOptions } from './services/grc-report.service';
 
 @Component({
     selector: 'app-grc-report-public',
@@ -97,11 +97,37 @@ export class GrcReportPublicComponent implements OnInit {
     errorMessage = '';
 
     private companyId = '';
-    private unitId: string | undefined;
+    private unitId:    string | undefined;
+    private userId:    string | undefined;
+    private dateStart: string | undefined;
+    private dateEnd:   string | undefined;
+    private reportOptions: GrcReportOptions | undefined;
 
     ngOnInit(): void {
         this.companyId = this.route.snapshot.paramMap.get('companyId') ?? '';
-        this.unitId = this.route.snapshot.queryParamMap.get('unitId') ?? undefined;
+
+        const qp = this.route.snapshot.queryParamMap;
+        this.userId    = qp.get('userId')    ?? undefined;
+        this.unitId    = qp.get('unitId')    ?? undefined;
+        this.dateStart = qp.get('dateStart') ?? undefined;
+        this.dateEnd   = qp.get('dateEnd')   ?? undefined;
+
+        // Seções: ?licencas=0&condicionantes=0&epis=0 desabilitam cada seção
+        // Histórico: ?epiHistory=0 desabilita
+        const flag = (key: string, def = true) =>
+            qp.has(key) ? qp.get(key) !== '0' : def;
+
+        this.reportOptions = {
+            sections: {
+                licencas:       flag('licencas'),
+                condicionantes: flag('condicionantes'),
+                epis:           flag('epis'),
+            },
+            epiHistory: flag('epiHistory'),
+            dateStart:  this.dateStart,
+            dateEnd:    this.dateEnd,
+        };
+
         this.generate();
     }
 
@@ -117,7 +143,7 @@ export class GrcReportPublicComponent implements OnInit {
             }
             this.state = 'loading';
             this.cdr.markForCheck();
-            await this.grcReportService.generateReport(this.companyId, this.unitId);
+            await this.grcReportService.generateReport(this.companyId, this.unitId, this.userId, this.reportOptions);
             this.state = 'success';
         } catch (err: unknown) {
             this.state = 'error';

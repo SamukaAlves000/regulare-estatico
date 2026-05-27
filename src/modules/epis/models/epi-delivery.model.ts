@@ -25,7 +25,9 @@ export interface EpiDelivery {
   companyName?: string;
   companyCnpj?: string;
   unitId: string;
+  unitName?: string;
   sectorId: string;
+  sectorName?: string;
   
   deliveryDate: string; // ISO date string
   items: EpiDeliveryItem[];

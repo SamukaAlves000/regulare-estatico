@@ -47,6 +47,7 @@ export class AssinaturaEntregaComponent implements OnInit {
 
   private readonly route = inject(ActivatedRoute);
   private readonly repository = inject(EpiDeliveriesRepository);
+  private readonly epiDeliveriesService = inject(EpiDeliveriesService);
   private readonly storage = inject(Storage);
   private readonly snackBar = inject(MatSnackBar);
   private readonly cd = inject(ChangeDetectorRef);
@@ -201,8 +202,7 @@ export class AssinaturaEntregaComponent implements OnInit {
 
       // Log audit
       try {
-        const service = inject(EpiDeliveriesService);
-        await service.logSignature(this.entregaId, { method: 'canvas_direct' });
+        await this.epiDeliveriesService.logSignature(this.entregaId, { method: 'canvas_direct' });
       } catch (logErr) {
         console.error('Audit log error:', logErr);
       }

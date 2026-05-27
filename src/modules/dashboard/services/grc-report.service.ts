@@ -22,13 +22,13 @@ import { Company } from '../../cadastros/models/company.model';
 import { Unit } from '../../cadastros/models/unit.model';
 
 // Importar Firestore
-import { doc, getDoc, collection, query, where, getDocs } from '@angular/fire/firestore';
+import { doc, getDoc, collection, query, where, getDocs, QuerySnapshot, DocumentData } from '@angular/fire/firestore';
 
 // Serviços de rastreabilidade e autenticação documental
 import { ReportHashService } from '../../../core/services/report-hash.service';
 import { DocumentValidationService } from '../../../core/services/document-validation.service';
 import { AuditLogService } from '../../../core/services/audit-log.service';
-import { AuditAction } from '../../../core/models/audit-log.model';
+import { AuditAction, AuditLog } from '../../../core/models/audit-log.model';
 import { SessionService } from '../../../core/services/session.service';
 import { environment } from '../../../environments/environment';
 
@@ -66,6 +66,24 @@ export interface GrcMetrics {
         vencidos: number;
     };
 }
+
+export interface GrcReportSections {
+    licencas:       boolean;
+    condicionantes: boolean;
+    epis:           boolean;
+}
+
+export interface GrcReportOptions {
+    sections:   GrcReportSections;
+    epiHistory: boolean;
+    dateStart?: string; // ISO 'YYYY-MM-DD' — vencimento/prazo a partir de
+    dateEnd?:   string; // ISO 'YYYY-MM-DD' — vencimento/prazo até
+}
+
+const DEFAULT_OPTIONS: GrcReportOptions = {
+    sections:   { licencas: true, condicionantes: true, epis: true },
+    epiHistory: true,
+};
 
 // ---------------------------------------------------------------------------
 // Paleta de cores centralizada
@@ -141,7 +159,7 @@ export class GrcReportService {
         return snap.exists();
     }
 
-    async generateReport(companyId: string, unitId?: string, idUsuarioLogado?: string): Promise<void> {
+    async generateReport(companyId: string, unitId?: string, idUsuarioLogado?: string, options?: Partial<GrcReportOptions>): Promise<void> {
         let emitterName = 'sistema';
         let emitterEmail = 'sistema';
         let emitterUserId = 'sistema';
@@ -179,6 +197,13 @@ export class GrcReportService {
             emitterProfile = user?.profile ?? 'sistema';
         }
 
+        const opts: GrcReportOptions = {
+            sections:   { ...DEFAULT_OPTIONS.sections,   ...options?.sections },
+            epiHistory: options?.epiHistory ?? DEFAULT_OPTIONS.epiHistory,
+            dateStart:  options?.dateStart,
+            dateEnd:    options?.dateEnd,
+        };
+
         try {
             // 1. Código sequencial único (REL-GRC-2026-0509-001)
             const reportCode     = await this.docValidation.generateSequentialCode();
@@ -206,14 +231,43 @@ export class GrcReportService {
                 console.warn('[GrcReportService] Falha ao gerar QR Code — relatório continuará sem QR.');
             }
 
-            // 4. Buscar dados do Firestore em paralelo
-            const [companyDoc, unitDoc, licensesSnap, conditionsSnap, epiSnap] = await Promise.all([
+            // 4. Buscar dados do Firestore em paralelo (somente seções selecionadas)
+            const EPI_AUDIT_ACTIONS = [
+                'epi_delivery_created',
+                'epi_delivery_updated',
+                'epi_delivery_document_uploaded',
+                'epi_delivery_term_downloaded',
+                'epi_delivery_signed',
+            ];
+            const empty: Promise<QuerySnapshot<DocumentData>> =
+                Promise.resolve({ docs: [], empty: true, size: 0 } as unknown as QuerySnapshot<DocumentData>);
+
+            const [companyDoc, unitDoc, licensesSnap, conditionsSnap, epiSnap, auditLogsSnap] = await Promise.all([
                 getDoc(doc(this.firestore, 'companies', companyId)),
                 unitId ? getDoc(doc(this.firestore, 'units', unitId)) : Promise.resolve(null),
-                getDocs(query(collection(this.firestore, 'licenses'), where('companyId', '==', companyId))),
-                getDocs(query(collection(this.firestore, 'licenseConditions'), where('companyId', '==', companyId))),
-                getDocs(query(collection(this.firestore, 'epi_deliveries'), where('companyId', '==', companyId))),
+                opts.sections.licencas
+                    ? getDocs(query(collection(this.firestore, 'licenses'), where('companyId', '==', companyId)))
+                    : empty,
+                opts.sections.condicionantes
+                    ? getDocs(query(collection(this.firestore, 'licenseConditions'), where('companyId', '==', companyId)))
+                    : empty,
+                opts.sections.epis
+                    ? getDocs(query(collection(this.firestore, 'epi_deliveries'), where('companyId', '==', companyId)))
+                    : empty,
+                (opts.sections.epis && opts.epiHistory)
+                    ? getDocs(query(collection(this.firestore, 'audit_logs'), where('action', 'in', EPI_AUDIT_ACTIONS)))
+                    : empty,
             ]);
+
+            const auditByDelivery = new Map<string, AuditLog[]>();
+            auditLogsSnap.docs.forEach(d => {
+                const log = { ...d.data(), id: d.id } as AuditLog;
+                const deliveryId = log.details?.deliveryId;
+                if (deliveryId) {
+                    if (!auditByDelivery.has(deliveryId)) auditByDelivery.set(deliveryId, []);
+                    auditByDelivery.get(deliveryId)!.push(log);
+                }
+            });
 
             const company = { ...companyDoc.data(), id: companyDoc.id } as Company;
             const unit    = unitDoc?.exists() ? { ...unitDoc.data(), id: unitDoc.id } as Unit : null;
@@ -235,11 +289,26 @@ export class GrcReportService {
                 epis     = epis.filter(e => e.unitId === unitId);
             }
 
+            // Filtro por período de vencimento/prazo
+            if (opts.dateStart || opts.dateEnd) {
+                const rangeStart = opts.dateStart ? this.startOfDay(this.parseDate(opts.dateStart)) : null;
+                const rangeEnd   = opts.dateEnd   ? this.startOfDay(this.parseDate(opts.dateEnd))   : null;
+                const inRange = (dateStr: string | undefined) => {
+                    const d = this.startOfDay(this.parseDate(dateStr));
+                    if (rangeStart && d < rangeStart) return false;
+                    if (rangeEnd   && d > rangeEnd)   return false;
+                    return true;
+                };
+                licenses   = licenses.filter(l => inRange(l.expirationDate));
+                conditions = conditions.filter(c => inRange(c.dueDate));
+                epis       = epis.filter(e => e.items.some(i => inRange(i.epiExpirationDate)));
+            }
+
             // 5. Montar PDF com seção de autenticidade
             const metrics = this.calculateMetrics(licenses, conditions, epis);
             const docDef  = this.buildDocDefinition(
                 company, unit, licenses, conditions, epis, metrics,
-                reportCode, hash, generatedAtUtc, emitterName, qrDataUrl, validationUrl
+                reportCode, hash, generatedAtUtc, emitterName, qrDataUrl, validationUrl, auditByDelivery, opts
             );
 
             // 6. Download via pdfMake.download() — mesmo método que funcionava antes
@@ -480,15 +549,40 @@ export class GrcReportService {
 
     private fmt(dateStr: string | undefined): string {
         if (!dateStr) return '-';
+
         try {
-            if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-                const [year, month, day] = dateStr.split('T')[0].split('-').map(Number);
-                return `${day.toString().padStart(2, '0')}/${month.toString().padStart(2, '0')}/${year}`;
+
+            // ISO UTC: 2026-05-26T02:24:55.265Z
+            if (/^\d{4}-\d{2}-\d{2}T/.test(dateStr)) {
+                const d = new Date(dateStr);
+
+                return new Intl.DateTimeFormat('pt-BR', {
+                    timeZone: 'America/Sao_Paulo'
+                }).format(d);
             }
-            if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}/)) return dateStr;
+
+            // Apenas data: 2026-05-26
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                const [year, month, day] = dateStr.split('-');
+
+                return `${day}/${month}/${year}`;
+            }
+
+            // Já formatada
+            if (/^\d{2}\/\d{2}\/\d{4}/.test(dateStr)) {
+                return dateStr;
+            }
+
             const d = new Date(dateStr);
-            if (isNaN(d.getTime())) return dateStr;
-            return d.toLocaleDateString('pt-BR');
+
+            if (isNaN(d.getTime())) {
+                return dateStr;
+            }
+
+            return new Intl.DateTimeFormat('pt-BR', {
+                timeZone: 'America/Sao_Paulo'
+            }).format(d);
+
         } catch {
             return dateStr;
         }
@@ -570,7 +664,12 @@ export class GrcReportService {
     // -------------------------------------------------------------------------
     // Seção de EPIs por item
     // -------------------------------------------------------------------------
-    private buildEpiItemsSection(epis: EpiDelivery[], today: Date, limit30: Date): object[] {
+    private buildEpiItemsSection(
+        epis: EpiDelivery[],
+        today: Date,
+        limit30: Date,
+        auditByDelivery: Map<string, AuditLog[]>,
+    ): object[] {
         const section: object[] = [];
 
         if (epis.length === 0) {
@@ -598,7 +697,7 @@ export class GrcReportService {
                         stack: [
                             { text: `Total de Itens: ${delivery.items.length}`, fontSize: 9, alignment: 'right' },
                             { text: `Empresa: ${delivery.companyName || '-'}`, fontSize: 8, color: C.muted, alignment: 'right' },
-                            { text: `Unidade: ${delivery.unitId}`, fontSize: 8, color: C.muted, alignment: 'right' },
+                            { text: `Unidade: ${delivery.unitName}`, fontSize: 8, color: C.muted, alignment: 'right' },
                         ],
                         width: '30%',
                     },
@@ -629,9 +728,8 @@ export class GrcReportService {
 
                 return [
                     { text: item.name, fontSize: 8, bold: true },
-                    { text: item.brand || '-', fontSize: 8, alignment: 'center' },
-                    { text: item.model || '-', fontSize: 8, alignment: 'center' },
-                    { text: item.caNumber || '-', fontSize: 8, alignment: 'center' },
+                    { text: item.manufacturer || '-', fontSize: 8, alignment: 'center' },
+                    { text: item.certificationNumber || '-', fontSize: 8, alignment: 'center' },
                     { text: `${item.quantity}`, fontSize: 8, alignment: 'center' },
                     { text: expDate, fontSize: 8, alignment: 'center', color: daysLeft < 0 ? C.danger : (daysLeft <= 30 ? C.warning : C.text) },
                     { text: daysText, fontSize: 7, alignment: 'center', color: daysColor },
@@ -642,12 +740,11 @@ export class GrcReportService {
             section.push({
                 table: {
                     headerRows: 1,
-                    widths: ['*', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto'],
+                    widths: ['*', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto'],
                     body: [
                         [
                             this.th('EPI'),
-                            this.th('Marca'),
-                            this.th('Modelo'),
+                            this.th('Fabricante'),
                             this.th('CA'),
                             this.th('Qtd'),
                             this.th('Vencimento'),
@@ -658,11 +755,77 @@ export class GrcReportService {
                     ],
                 },
                 layout: 'lightHorizontalLines',
-                margin: [8, 4, 0, 12],
+                margin: [8, 4, 0, 4],
             });
+
+            const deliveryLogs = auditByDelivery.get(delivery.id) ?? [];
+            if (deliveryLogs.length > 0) {
+                section.push(this.buildDeliveryHistoryTable(deliveryLogs));
+            }
         });
 
         return section;
+    }
+
+    // -------------------------------------------------------------------------
+    // Histórico de ações de uma entrega (audit_logs)
+    // -------------------------------------------------------------------------
+    private readonly ACTION_LABELS: Record<string, string> = {
+        'epi_delivery_created':           'CRIOU ENTREGA',
+        'epi_delivery_updated':           'ALTEROU ENTREGA',
+        'epi_delivery_document_uploaded': 'UPLOAD DOC.',
+        'epi_delivery_term_downloaded':   'DOWNLOAD TERMO',
+        'epi_delivery_signed':            'ENTREGA ASSINADA',
+    };
+
+    private buildDeliveryHistoryTable(logs: AuditLog[]): object {
+        const sorted = [...logs].sort((a, b) => {
+            const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return ta - tb;
+        });
+
+        const rows = sorted.map(log => {
+            const isSigned = log.action === 'epi_delivery_signed';
+            let dt = '-';
+            if (log.timestamp) {
+                try {
+                    const d = typeof (log.timestamp as any).toDate === 'function'
+                        ? (log.timestamp as any).toDate()
+                        : new Date(log.timestamp);
+                    dt = d.toLocaleString('pt-BR');
+                } catch { /* mantém '-' */ }
+            }
+            const user = isSigned ? '-' : (log.user_profile || '-');
+            const action = this.ACTION_LABELS[log.action as string] ?? log.action;
+            return [
+                { text: dt,     fontSize: 7, color: C.text },
+                { text: user,   fontSize: 7, color: C.text },
+                { text: action, fontSize: 7, bold: true, color: C.primary },
+            ];
+        });
+
+        return {
+            margin: [8, 0, 0, 12],
+            stack: [
+                { text: 'Histórico de Ações', fontSize: 8, bold: true, color: C.primary, margin: [0, 2, 0, 3] },
+                {
+                    table: {
+                        headerRows: 1,
+                        widths: ['auto', '*', 'auto'],
+                        body: [
+                            [
+                                { text: 'Data/Hora', fontSize: 7, bold: true, fillColor: C.condBg, color: C.primary },
+                                { text: 'Usuário',   fontSize: 7, bold: true, fillColor: C.condBg, color: C.primary },
+                                { text: 'Ação',      fontSize: 7, bold: true, fillColor: C.condBg, color: C.primary },
+                            ],
+                            ...rows,
+                        ],
+                    },
+                    layout: 'lightHorizontalLines',
+                },
+            ],
+        };
     }
 
     // -------------------------------------------------------------------------
@@ -681,6 +844,8 @@ export class GrcReportService {
         emitterName: string,
         qrDataUrl: string,
         validationUrl: string,
+        auditByDelivery: Map<string, AuditLog[]>,
+        opts: GrcReportOptions,
     ): object {
         const emissionDate = new Date(generatedAtUtc).toLocaleString('pt-BR');
         const today = this.startOfDay(new Date());
@@ -742,49 +907,57 @@ export class GrcReportService {
 
         const confColor = (v: number) => v >= 80 ? C.success : v >= 60 ? C.warning : C.danger;
 
+        const summaryBody: any[] = [
+            ['Categoria', 'Total', 'Em Dia', 'A Vencer', 'Irregulares', 'Conformidade'].map(h => this.th(h)),
+        ];
+        if (opts.sections.licencas) {
+            summaryBody.push([
+                this.td('Licenças', { bold: true }),
+                this.td(lc.total, { alignment: 'center' }),
+                this.td(lc.emDia, { alignment: 'center', color: C.success }),
+                this.td(lc.aVencer, { alignment: 'center', color: C.warning }),
+                this.td(lc.vencidas, { alignment: 'center', color: C.danger }),
+                this.td(`${licConf}%`, { alignment: 'center', color: confColor(licConf) }),
+            ]);
+        }
+        if (opts.sections.condicionantes) {
+            summaryBody.push([
+                this.td('Condicionantes', { bold: true }),
+                this.td(cc.total, { alignment: 'center' }),
+                this.td(cc.cumpridas, { alignment: 'center', color: C.success }),
+                this.td(cc.aVencer, { alignment: 'center', color: C.warning }),
+                this.td(cc.vencidas + cc.pendentes, { alignment: 'center', color: C.danger }),
+                this.td(`${condConf}%`, { alignment: 'center', color: confColor(condConf) }),
+            ]);
+        }
+        if (opts.sections.epis) {
+            summaryBody.push([
+                this.td('EPIs', { bold: true }),
+                this.td(ec.total, { alignment: 'center' }),
+                this.td(ec.ok, { alignment: 'center', color: C.success }),
+                this.td(ec.aVencer, { alignment: 'center', color: C.warning }),
+                this.td(ec.vencidos, { alignment: 'center', color: C.danger }),
+                this.td(`${epiConf}%`, { alignment: 'center', color: confColor(epiConf) }),
+            ]);
+        }
+        summaryBody.push([
+            this.td('TOTAL GERAL', { bold: true, fillColor: C.light }),
+            this.td(m.totalGeral, { alignment: 'center', bold: true, fillColor: C.light }),
+            this.td(lc.emDia + cc.cumpridas + ec.ok,
+                { alignment: 'center', bold: true, color: C.success, fillColor: C.light }),
+            this.td(lc.aVencer + cc.aVencer + ec.aVencer,
+                { alignment: 'center', bold: true, color: C.warning, fillColor: C.light }),
+            this.td(lc.vencidas + cc.vencidas + cc.pendentes + ec.vencidos,
+                { alignment: 'center', bold: true, color: C.danger, fillColor: C.light }),
+            this.td(`${m.conformidade}%`,
+                { alignment: 'center', bold: true, color: riskColor, fillColor: C.light }),
+        ]);
+
         const summaryTable = {
             table: {
                 headerRows: 1,
                 widths: ['*', 'auto', 'auto', 'auto', 'auto', 'auto'],
-                body: [
-                    ['Categoria', 'Total', 'Em Dia', 'A Vencer', 'Irregulares', 'Conformidade'].map(h => this.th(h)),
-                    [
-                        this.td('Licenças', { bold: true }),
-                        this.td(lc.total, { alignment: 'center' }),
-                        this.td(lc.emDia, { alignment: 'center', color: C.success }),
-                        this.td(lc.aVencer, { alignment: 'center', color: C.warning }),
-                        this.td(lc.vencidas, { alignment: 'center', color: C.danger }),
-                        this.td(`${licConf}%`, { alignment: 'center', color: confColor(licConf) }),
-                    ],
-                    [
-                        this.td('Condicionantes', { bold: true }),
-                        this.td(cc.total, { alignment: 'center' }),
-                        this.td(cc.cumpridas, { alignment: 'center', color: C.success }),
-                        this.td(cc.aVencer, { alignment: 'center', color: C.warning }),
-                        this.td(cc.vencidas + cc.pendentes, { alignment: 'center', color: C.danger }),
-                        this.td(`${condConf}%`, { alignment: 'center', color: confColor(condConf) }),
-                    ],
-                    [
-                        this.td('EPIs', { bold: true }),
-                        this.td(ec.total, { alignment: 'center' }),
-                        this.td(ec.ok, { alignment: 'center', color: C.success }),
-                        this.td(ec.aVencer, { alignment: 'center', color: C.warning }),
-                        this.td(ec.vencidos, { alignment: 'center', color: C.danger }),
-                        this.td(`${epiConf}%`, { alignment: 'center', color: confColor(epiConf) }),
-                    ],
-                    [
-                        this.td('TOTAL GERAL', { bold: true, fillColor: C.light }),
-                        this.td(m.totalGeral, { alignment: 'center', bold: true, fillColor: C.light }),
-                        this.td(lc.emDia + cc.cumpridas + ec.ok,
-                            { alignment: 'center', bold: true, color: C.success, fillColor: C.light }),
-                        this.td(lc.aVencer + cc.aVencer + ec.aVencer,
-                            { alignment: 'center', bold: true, color: C.warning, fillColor: C.light }),
-                        this.td(lc.vencidas + cc.vencidas + cc.pendentes + ec.vencidos,
-                            { alignment: 'center', bold: true, color: C.danger, fillColor: C.light }),
-                        this.td(`${m.conformidade}%`,
-                            { alignment: 'center', bold: true, color: riskColor, fillColor: C.light }),
-                    ],
-                ],
+                body: summaryBody,
             },
             margin: [0, 0, 0, 12],
         };
@@ -799,6 +972,10 @@ export class GrcReportService {
             return 'em_dia';
         };
 
+        const groupSections: object[] = [];
+        let sectionNum = 3;
+
+        if (opts.sections.licencas) {
         // Inicializa o mapa com TODOS os grupos
         const licensesByGroup = new Map<string, License[]>();
         ALL_GROUPS.forEach(group => licensesByGroup.set(group, []));
@@ -811,9 +988,6 @@ export class GrcReportService {
             }
             licensesByGroup.get(group)!.push(license);
         });
-
-        const groupSections: object[] = [];
-        let sectionNum = 3;
 
         const orderedGroups = [
             ...ALL_GROUPS,
@@ -899,15 +1073,17 @@ export class GrcReportService {
                 });
             });
         }
+        } // fim if (opts.sections.licencas)
 
         // -----------------------------------------------------------------------
         // SEÇÃO EPIs (COM "A VENCER")
         // -----------------------------------------------------------------------
-        const epiSection: object[] = [
-            this.sectionTitle(`${String(sectionNum).padStart(2, '0')} · SST — ENTREGAS DE EPIs`),
-        ];
-        sectionNum++;
-        epiSection.push(...this.buildEpiItemsSection(epis, today, limit30));
+        const epiSection: object[] = [];
+        if (opts.sections.epis) {
+            epiSection.push(this.sectionTitle(`${String(sectionNum).padStart(2, '0')} · SST — ENTREGAS DE EPIs`));
+            sectionNum++;
+            epiSection.push(...this.buildEpiItemsSection(epis, today, limit30, auditByDelivery));
+        }
 
         // -----------------------------------------------------------------------
         // CONCLUSÃO EXECUTIVA (COM "A VENCER")
@@ -1020,6 +1196,10 @@ export class GrcReportService {
                                 { text: `${company.addressCity} / ${company.addressUf}`, fontSize: 9 },
                                 ...(unit ? [{ text: `Unidade: ${unit.name} — ${unit.documentNumber}`, fontSize: 9 }] : []),
                                 { text: `Responsável Legal: ${company.legalResponsibleName}`, fontSize: 9 },
+                                ...(opts.dateStart || opts.dateEnd ? [{
+                                    text: `Período Analisado (Vencimento/Prazo): ${opts.dateStart ? this.fmt(opts.dateStart) : 'início'} até ${opts.dateEnd ? this.fmt(opts.dateEnd) : 'atual'}`,
+                                    fontSize: 9, color: C.primary, bold: true, margin: [0, 4, 0, 0],
+                                }] : []),
                             ],
                         },
                         {
